@@ -1198,7 +1198,7 @@ async function renameSelected() {
             }
             if (warning) {
                 const ok = await showConfirm(warning, {
-                    title: '订阅保存路径提醒',
+                    title: '路径提醒',
                     confirmText: '继续重命名',
                 });
                 if (!ok) return;
@@ -1451,15 +1451,15 @@ async function executePlan() {
         showToast('请先勾选要执行的预览项', { tone: 'warn', duration: 2400, placement: 'top-center' });
         return;
     }
-    const warningLines = selectedActions
+    const warningLines = Array.from(new Set(selectedActions
         .map(action => String(action.warning || '').trim())
-        .filter(Boolean);
+        .filter(Boolean)));
     let message = `确认执行已勾选的 ${selectedActions.length} 项重命名和移动吗？`;
     let title = '确认执行';
     let confirmText = '执行';
     if (warningLines.length > 0) {
         message = warningLines.join('\n');
-        title = '订阅保存路径提醒';
+        title = '路径提醒';
         confirmText = '继续执行';
     }
     const ok = await showConfirm(message, {

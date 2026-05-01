@@ -811,7 +811,7 @@ def _collect_scraper_subscription_path_warning(
                 break
         if not matched_path:
             continue
-        return f"文件夹【{matched_path}】正在被订阅任务【{label}】使用。"
+        return f"文件夹【{matched_path}】用于订阅任务【{label}】；更改可能导致保存路径失效或已保存内容重新识别。"
 
     return ""
 
@@ -1001,7 +1001,7 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
         "base_cid": base_cid,
         "actions": actions,
         "issues": issues,
-        "warnings": warnings,
+        "warnings": unique_preserve_order(warnings),
         "ready": bool(actions) and ready_count == len(actions) and not issues,
         "ready_count": ready_count,
         "total_count": len(actions),

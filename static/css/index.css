@@ -10467,6 +10467,13 @@
             font-weight: 760;
         }
 
+        .scraper-option-hint {
+            color: #64748b;
+            font-size: 0.71rem;
+            font-weight: 600;
+            line-height: 1.35;
+        }
+
         .scraper-tag-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -10757,6 +10764,10 @@
         html.theme-day .scraper-option-field,
         html.theme-day .scraper-prompt-message {
             color: #475569;
+        }
+
+        html.theme-day .scraper-option-hint {
+            color: #64748b;
         }
 
         html.theme-day .scraper-provider-tab,

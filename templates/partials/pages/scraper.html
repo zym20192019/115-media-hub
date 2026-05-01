@@ -125,16 +125,18 @@
                                             </select>
                                         </label>
                                         <label id="scraper-season-field" class="scraper-option-field hidden">
-                                            <span>默认季号</span>
+                                            <span>未识别时默认季号</span>
                                             <input id="scraper-season" type="number" min="1" max="99" value="1" class="scraper-input">
+                                            <span class="scraper-option-hint">没写季号时才使用；带 S01 / Season 1 的会优先按文件自身信息识别。</span>
                                         </label>
                                         <label id="scraper-episode-mode-field" class="scraper-option-field hidden">
-                                            <span>集数识别方式</span>
+                                            <span>季集识别方式</span>
                                             <select id="scraper-episode-mode" class="scraper-select">
-                                                <option value="auto">跟随 TMDB</option>
-                                                <option value="seasonal">单季 / 按季号</option>
-                                                <option value="absolute">多季 / 连续编号</option>
+                                                <option value="auto">自动跟随 TMDB</option>
+                                                <option value="seasonal">单季：按季号识别</option>
+                                                <option value="absolute">多季：按 TMDB 连续编号</option>
                                             </select>
+                                            <span class="scraper-option-hint">混多季时，开启多季识别后会按 TMDB 季集映射整理；没有记号时再用默认季号兜底。</span>
                                         </label>
                                     </div>
                                 </div>

@@ -555,6 +555,32 @@ def _build_scraper_media_titles(tmdb: Dict[str, Any], options: Dict[str, Any], f
     return title, file_title, folder_title
 
 
+def _resolve_scraper_selection_mode(selected: List[Dict[str, Any]], options: Dict[str, Any]) -> str:
+    items = [item for item in (selected or []) if isinstance(item, dict)]
+    single_folder_selection = len(items) == 1 and bool(items[0].get("is_dir"))
+    requested = str((options if isinstance(options, dict) else {}).get("selection_mode", "") or "").strip().lower()
+    if requested == "folder" and single_folder_selection:
+        return "folder"
+    if requested == "contents":
+        return "contents"
+    return "folder" if single_folder_selection else "contents"
+
+
+def _relative_parent_path_from_base(parent_path: str, base_path: str) -> str:
+    source = normalize_relative_path(str(parent_path or "").strip())
+    base = normalize_relative_path(str(base_path or "").strip())
+    if not source:
+        return ""
+    if not base:
+        return source
+    if source == base:
+        return ""
+    prefix = f"{base}/"
+    if source.startswith(prefix):
+        return source[len(prefix):]
+    return source
+
+
 def _format_tv_episode_code(task: Dict[str, Any], episodes: Set[int], default_season: int) -> Tuple[str, str]:
     normalized_values = sorted({max(0, int(value or 0)) for value in episodes if max(0, int(value or 0)) > 0})
     if not normalized_values:
@@ -582,6 +608,11 @@ def _build_scraper_target_path(entry: Dict[str, Any], tmdb: Dict[str, Any], opti
     media_type = normalize_tmdb_media_type(tmdb.get("tmdb_media_type") or tmdb.get("media_type"), "movie")
     organize_into_media_folder = bool(options.get("organize_into_media_folder", True))
     use_season_subfolder = bool(options.get("use_season_subfolder", True))
+    preserve_source_parent_path = bool(options.get("preserve_source_parent_path", False))
+    source_relative_parent_path = _relative_parent_path_from_base(
+        str(entry.get("parent_path", "") or ""),
+        str(options.get("base_path", "") or ""),
+    )
     _, ext = os.path.splitext(str(entry.get("name", "") or ""))
     tags = extract_scraper_tags(str(entry.get("name", "") or ""), options.get("preserve_tags", {})) if bool(options.get("preserve_file_info", False)) else []
     tag_suffix = _build_tag_suffix(tags)
@@ -598,12 +629,16 @@ def _build_scraper_target_path(entry: Dict[str, Any], tmdb: Dict[str, Any], opti
             return "", issue
         season_no = max(1, int(episode_code[1:3] or options.get("season") or 1))
         file_name = sanitize_scraper_name(f"{file_title} - {episode_code}{tag_suffix}") + ext
+        if preserve_source_parent_path:
+            return normalize_relative_path(join_relative_path(source_relative_parent_path, file_name)), ""
         if not organize_into_media_folder:
             return file_name, ""
         if not use_season_subfolder:
             return normalize_relative_path(join_relative_path(folder_title, file_name)), ""
         return normalize_relative_path(join_relative_path(folder_title, f"Season {season_no:02d}", file_name)), ""
     file_name = sanitize_scraper_name(f"{file_title}{tag_suffix}") + ext
+    if preserve_source_parent_path:
+        return normalize_relative_path(join_relative_path(source_relative_parent_path, file_name)), ""
     if not organize_into_media_folder:
         return file_name, ""
     return normalize_relative_path(join_relative_path(folder_title, file_name)), ""
@@ -755,10 +790,27 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError("请先选择 TMDB 条目")
     options = payload.get("options") if isinstance(payload.get("options"), dict) else {}
     base_cid = str(payload.get("base_cid", "0") or "0").strip() or "0"
+    base_path = normalize_relative_path(str(payload.get("base_path", "") or ""))
     selected = payload.get("entries", []) if isinstance(payload.get("entries"), list) else []
-    selected_has_folder = any(isinstance(item, dict) and item.get("is_dir") for item in selected)
+    if not base_path and selected:
+        selected_parent_paths = {
+            normalize_relative_path(str(item.get("parent_path", "") or "").strip())
+            for item in selected
+            if isinstance(item, dict) and str(item.get("parent_path", "") or "").strip()
+        }
+        if len(selected_parent_paths) == 1:
+            base_path = next(iter(selected_parent_paths))
     plan_options = dict(options)
-    plan_options["organize_into_media_folder"] = selected_has_folder
+    selection_mode = _resolve_scraper_selection_mode(selected, plan_options)
+    folder_mode = selection_mode == "folder"
+    plan_options["selection_mode"] = selection_mode
+    plan_options["base_path"] = base_path
+    plan_options["organize_into_media_folder"] = folder_mode
+    plan_options["preserve_source_parent_path"] = not folder_mode
+    if not folder_mode:
+        plan_options["include_tmdb_id"] = False
+        plan_options["use_season_subfolder"] = False
+        plan_options["rename_selected_folders"] = False
     expanded_files, scan_issues = _expand_selected_scraper_entries(provider, cookie, selected)
     actions: List[Dict[str, Any]] = []
     issues: List[str] = list(scan_issues)
@@ -766,7 +818,7 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
     target_paths: Set[str] = set()
     target_folder_names: Set[str] = set()
     action_index = 1
-    if selected_has_folder and bool(options.get("rename_selected_folders", True)):
+    if folder_mode and bool(plan_options.get("rename_selected_folders", True)):
         _, _, target_folder_name = _build_scraper_media_titles(tmdb, plan_options, "")
         for raw in selected:
             item = raw if isinstance(raw, dict) else {}

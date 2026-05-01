@@ -185,6 +185,15 @@ function getSelectionKey(entries = getSelectedEntries()) {
         .join('|');
 }
 
+function getSelectionMode(entries = getSelectedEntries()) {
+    const items = Array.isArray(entries) ? entries : [];
+    return items.length === 1 && !!items[0]?.is_dir ? 'folder' : 'contents';
+}
+
+function isWholeFolderSelection(entries = getSelectedEntries()) {
+    return getSelectionMode(entries) === 'folder';
+}
+
 function resetIdentifyContext({ resetInputs = false } = {}) {
     state.identifyResult = null;
     state.identifySelectionKey = '';
@@ -355,7 +364,14 @@ function renderSelection() {
             countEl.textContent = `预览 ${planActions.length} 项 / 可执行 ${readyCount} 项 / 已勾选 ${selectedReadyCount} 项`;
         } else {
             const count = selectedEntries.length;
-            countEl.textContent = count ? `已选择 ${count} 项` : '未选择条目';
+            if (!count) {
+                countEl.textContent = '未选择条目';
+            } else if (isWholeFolderSelection(selectedEntries)) {
+                countEl.textContent = `已选择整个文件夹：${selectedEntries[0].name || '--'}`;
+            } else {
+                const hasFolder = selectedEntries.some(item => item.is_dir);
+                countEl.textContent = `已选择 ${count} 项 · 内容模式（只改文件名${hasFolder ? '，含子文件夹内文件' : ''}）`;
+            }
         }
     }
     const bindingBtn = $('scraper-bound-media-btn');
@@ -373,11 +389,19 @@ function renderSelection() {
         checkAll.disabled = state.loading || selectable.length <= 0;
     }
     const hasSelection = selectedEntries.length > 0;
-    const selectedSingleFolder = selectedEntries.length === 1 && !!selectedEntries[0].is_dir;
+    const selectedSingleFolder = isWholeFolderSelection(selectedEntries);
     const selectedInCurrent = state.entries.filter(item => state.selected.has(item.id)).length;
+    const renameButton = document.querySelector('[data-scraper-action="rename-selected"]');
+    if (renameButton) {
+        const showRename = selectedSingleFolder && !hasPlan;
+        renameButton.classList.toggle('hidden', !showRename);
+        renameButton.disabled = state.loading || !showRename;
+        renameButton.classList.toggle('btn-disabled', state.loading || !showRename);
+        renameButton.textContent = '重命名文件夹';
+        renameButton.title = showRename ? '仅在选中整个剧集文件夹时可用' : '仅在选中整个剧集文件夹时可用';
+    }
     const actionRules = {
         'select-range': !hasPlan && selectedInCurrent >= 2,
-        'rename-selected': selectedSingleFolder,
         'prepare-move': hasSelection,
         'delete-selected': hasSelection,
         identify: hasSelection,
@@ -411,7 +435,7 @@ function renderSelection() {
         inlineExecuteBtn.classList.toggle('btn-disabled', state.executeBusy || selectedReadyCount <= 0);
         inlineExecuteBtn.textContent = state.executeBusy ? '提交中...' : `执行重命名 ${selectedReadyCount} 项`;
     }
-    syncFolderRenameControl();
+    syncFolderScopedControls();
 }
 
 function renderMoveBuffer() {
@@ -555,16 +579,16 @@ function getTmdbSeasonCount(binding = state.tmdb) {
 
 function getSelectedEpisodeModeLabel(mode) {
     const normalized = String(mode || 'auto').trim();
-    if (normalized === 'absolute') return '多季 / 连续编号';
-    if (normalized === 'seasonal') return '单季 / 按季号';
-    return '跟随 TMDB';
+    if (normalized === 'absolute') return '多季：按 TMDB 连续编号';
+    if (normalized === 'seasonal') return '单季：按季号识别';
+    return '自动跟随 TMDB';
 }
 
 function getEffectiveEpisodeModeLabel() {
     const selected = String($('scraper-episode-mode')?.value || 'auto').trim();
     if (selected !== 'auto') return getSelectedEpisodeModeLabel(selected);
     const tmdbMode = String(state.tmdb?.tmdb_episode_mode || '').trim();
-    return tmdbMode ? `跟随 TMDB（${getSelectedEpisodeModeLabel(tmdbMode)}）` : '跟随 TMDB';
+    return tmdbMode ? `TMDB 推荐：${getSelectedEpisodeModeLabel(tmdbMode)}` : '自动跟随 TMDB';
 }
 
 function syncSeasonControl() {
@@ -604,22 +628,43 @@ function syncFileInfoControls() {
     });
 }
 
+function syncIncludeTmdbIdControl() {
+    const input = $('scraper-include-tmdb-id');
+    const label = input?.closest('label');
+    if (!input) return;
+    const wholeFolderMode = isWholeFolderSelection();
+    input.disabled = !wholeFolderMode;
+    if (!wholeFolderMode) {
+        if (input.checked) {
+            input.dataset.autoDisabled = '1';
+        }
+        input.checked = false;
+    } else if (input.dataset.autoDisabled === '1') {
+        input.checked = true;
+        delete input.dataset.autoDisabled;
+    }
+    label?.classList.toggle('is-disabled', !wholeFolderMode);
+    if (label) {
+        label.title = wholeFolderMode ? '' : '仅在选中整个剧集文件夹时可用';
+    }
+}
+
 function syncSeasonSubfolderControl() {
     const input = $('scraper-use-season-subfolder');
     const label = $('scraper-use-season-subfolder-wrap');
     if (!input) return;
-    const hasSingleFolder = getSelectedEntries().length === 1 && !!getSelectedEntries()[0]?.is_dir;
-    input.disabled = !hasSingleFolder;
-    if (!hasSingleFolder) {
+    const wholeFolderMode = isWholeFolderSelection();
+    input.disabled = !wholeFolderMode;
+    if (!wholeFolderMode) {
         input.checked = false;
         input.dataset.autoDisabled = '1';
     } else if (input.dataset.autoDisabled === '1') {
         input.checked = true;
         delete input.dataset.autoDisabled;
     }
-    label?.classList.toggle('is-disabled', !hasSingleFolder);
+    label?.classList.toggle('is-disabled', !wholeFolderMode);
     if (label) {
-        label.title = hasSingleFolder ? '' : '仅在选中单个文件夹时可用';
+        label.title = wholeFolderMode ? '' : '仅在选中整个剧集文件夹时可用';
     }
 }
 
@@ -627,21 +672,27 @@ function syncFolderRenameControl() {
     const input = $('scraper-rename-selected-folders');
     const label = $('scraper-rename-selected-folders-wrap');
     if (!input) return;
-    const hasSingleFolder = getSelectedEntries().length === 1 && !!getSelectedEntries()[0]?.is_dir;
-    input.disabled = !hasSingleFolder;
-    if (!hasSingleFolder) {
+    const wholeFolderMode = isWholeFolderSelection();
+    input.disabled = !wholeFolderMode;
+    if (!wholeFolderMode) {
         input.checked = false;
         input.dataset.autoDisabled = '1';
     } else if (input.dataset.autoDisabled === '1') {
         input.checked = true;
         delete input.dataset.autoDisabled;
     }
-    label?.classList.toggle('is-disabled', !hasSingleFolder);
+    label?.classList.toggle('is-disabled', !wholeFolderMode);
     if (label) {
-        label.title = hasSingleFolder
-            ? '仅在选中单个文件夹时可用。若该文件夹正在被订阅任务使用，重命名后请到订阅里重新选择新的保存路径。'
-            : '仅在选中单个文件夹时可用';
+        label.title = wholeFolderMode
+            ? '仅在选中整个剧集文件夹时可用。若该文件夹正在被订阅任务使用，重命名后请到订阅里重新选择新的保存路径。'
+            : '仅在选中整个剧集文件夹时可用';
     }
+}
+
+function syncFolderScopedControls() {
+    syncIncludeTmdbIdControl();
+    syncSeasonSubfolderControl();
+    syncFolderRenameControl();
 }
 
 function getDisplayEntries() {
@@ -783,8 +834,7 @@ function renderIdentify() {
     syncSeasonControl();
     syncEpisodeModeControl();
     syncFileInfoControls();
-    syncSeasonSubfolderControl();
-    syncFolderRenameControl();
+    syncFolderScopedControls();
 }
 
 function collectOptions() {
@@ -792,13 +842,16 @@ function collectOptions() {
     document.querySelectorAll('[data-scraper-tag]').forEach((input) => {
         preserveTags[String(input.dataset.scraperTag || '').trim()] = !!input.checked;
     });
+    const selectionMode = getSelectionMode();
+    const folderMode = selectionMode === 'folder';
     return {
+        selection_mode: selectionMode,
         title_language: String($('scraper-title-language')?.value || 'zh'),
         season: Math.max(1, Number($('scraper-season')?.value || 1) || 1),
         episode_mode: String($('scraper-episode-mode')?.value || 'auto'),
-        include_tmdb_id: !!$('scraper-include-tmdb-id')?.checked,
-        use_season_subfolder: !$('scraper-use-season-subfolder')?.disabled && !!$('scraper-use-season-subfolder')?.checked,
-        rename_selected_folders: !$('scraper-rename-selected-folders')?.disabled && !!$('scraper-rename-selected-folders')?.checked,
+        include_tmdb_id: folderMode && !$('scraper-include-tmdb-id')?.disabled && !!$('scraper-include-tmdb-id')?.checked,
+        use_season_subfolder: folderMode && !$('scraper-use-season-subfolder')?.disabled && !!$('scraper-use-season-subfolder')?.checked,
+        rename_selected_folders: folderMode && !$('scraper-rename-selected-folders')?.disabled && !!$('scraper-rename-selected-folders')?.checked,
         preserve_file_info: !!$('scraper-preserve-file-info')?.checked,
         preserve_tags: preserveTags,
     };
@@ -1257,6 +1310,7 @@ async function buildPlan() {
         const data = await window.MediaHubApi.postJson('/scraper/rename-plan', {
             provider: state.provider,
             base_cid: state.cid,
+            base_path: currentParentPath(),
             entries,
             tmdb: tmdb || state.tmdb,
             options,

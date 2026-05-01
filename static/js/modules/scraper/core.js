@@ -159,7 +159,9 @@ function enrichEntry(entry) {
     const id = String(item.id || item.cid || item.fid || '').trim();
     const name = String(item.name || '').trim();
     const parentPath = currentParentPath();
-    const path = normalizePath(item.path || joinPath(parentPath, name));
+    const itemPath = normalizePath(item.path || '');
+    const combinedPath = normalizePath(joinPath(parentPath, name));
+    const path = itemPath && (itemPath.includes('/') || !parentPath) ? itemPath : combinedPath;
     return {
         ...item,
         id,
@@ -178,15 +180,65 @@ function getSelectedEntries() {
         .map(item => ({ ...item }));
 }
 
+function getSelectionPath(entry = {}) {
+    const item = entry && typeof entry === 'object' ? entry : {};
+    return normalizePath(item.path || joinPath(item.parent_path || '', item.name || ''));
+}
+
+function getSelectionParentPath(entry = {}) {
+    const item = entry && typeof entry === 'object' ? entry : {};
+    return normalizePath(item.parent_path || currentParentPath());
+}
+
+function isSelectionPathCovered(path, ancestorPath) {
+    const normalizedPath = normalizePath(path);
+    const normalizedAncestor = normalizePath(ancestorPath);
+    if (!normalizedPath || !normalizedAncestor) return false;
+    return normalizedPath === normalizedAncestor || normalizedPath.startsWith(`${normalizedAncestor}/`);
+}
+
+function getEffectiveSelectedEntries(entries = getSelectedEntries()) {
+    const items = Array.isArray(entries) ? entries : [];
+    const normalized = items
+        .filter(item => item && item.id && item.name)
+        .map(item => ({
+            ...item,
+            path: getSelectionPath(item),
+        }))
+        .sort((a, b) => {
+            const depthA = getSelectionPath(a).split('/').filter(Boolean).length;
+            const depthB = getSelectionPath(b).split('/').filter(Boolean).length;
+            if (depthA !== depthB) return depthA - depthB;
+            if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+            const pathCompare = String(a.path || '').localeCompare(String(b.path || ''), 'zh-Hans-CN');
+            if (pathCompare !== 0) return pathCompare;
+            return String(a.id || '').localeCompare(String(b.id || ''));
+        });
+    const selected = [];
+    const seenIds = new Set();
+    const seenPaths = new Set();
+    normalized.forEach(item => {
+        const id = String(item.id || '').trim();
+        const path = normalizePath(item.path || '');
+        if (!id || !path) return;
+        if (seenIds.has(id) || seenPaths.has(path)) return;
+        if (selected.some(ancestor => ancestor.is_dir && isSelectionPathCovered(path, ancestor.path))) return;
+        selected.push({ ...item, path });
+        seenIds.add(id);
+        seenPaths.add(path);
+    });
+    return selected;
+}
+
 function getSelectionKey(entries = getSelectedEntries()) {
-    return entries
+    return getEffectiveSelectedEntries(entries)
         .map(item => `${item.is_dir ? 'd' : 'f'}:${item.id}`)
         .sort()
         .join('|');
 }
 
 function getSelectionMode(entries = getSelectedEntries()) {
-    const items = Array.isArray(entries) ? entries : [];
+    const items = getEffectiveSelectedEntries(entries);
     return items.length === 1 && !!items[0]?.is_dir ? 'folder' : 'contents';
 }
 
@@ -353,7 +405,7 @@ function getSelectedReadyPlanCount() {
 
 function renderSelection() {
     const countEl = $('scraper-selection-count');
-    const selectedEntries = getSelectedEntries();
+    const selectedEntries = getEffectiveSelectedEntries();
     const planActions = getPlanActions();
     const selectedReadyCount = getSelectedReadyPlanCount();
     const hasPlan = planActions.length > 0;
@@ -378,7 +430,7 @@ function renderSelection() {
     if (bindingBtn) {
         bindingBtn.classList.toggle('hidden', !hasBinding);
         bindingBtn.disabled = !hasBinding;
-        bindingBtn.textContent = hasBinding ? `影视：${getTmdbDisplayTitle()}` : '';
+        bindingBtn.textContent = hasBinding ? `已绑定：${getTmdbDisplayTitle()}` : '';
     }
     const checkAll = $('scraper-check-all');
     if (checkAll) {
@@ -413,14 +465,6 @@ function renderSelection() {
         button.classList.toggle('btn-disabled', state.loading || !enabled);
         if (action === 'identify') button.textContent = hasBinding ? '修改识别' : '识别';
     });
-    const inlineBuildBtn = $('scraper-inline-build-plan-btn');
-    if (inlineBuildBtn) {
-        const showBuild = hasSelection && hasBinding && !hasPlan;
-        inlineBuildBtn.classList.toggle('hidden', !showBuild);
-        inlineBuildBtn.disabled = state.loading || state.planBusy || !showBuild;
-        inlineBuildBtn.classList.toggle('btn-disabled', state.loading || state.planBusy || !showBuild);
-        inlineBuildBtn.textContent = state.planBusy ? '生成中...' : '生成预览';
-    }
     const clearPlanBtn = $('scraper-clear-plan-btn');
     if (clearPlanBtn) {
         clearPlanBtn.classList.toggle('hidden', !hasPlan);
@@ -436,6 +480,30 @@ function renderSelection() {
         inlineExecuteBtn.textContent = state.executeBusy ? '提交中...' : `执行重命名 ${selectedReadyCount} 项`;
     }
     syncFolderScopedControls();
+    syncBuildPlanControls();
+}
+
+function syncBuildPlanControls() {
+    const selectedEntries = getEffectiveSelectedEntries();
+    const hasBinding = !!(state.tmdb && Number(state.tmdb.tmdb_id || state.tmdb.id || 0) > 0);
+    const hasPlan = getPlanActions().length > 0;
+    const showBuild = selectedEntries.length > 0 && hasBinding && !hasPlan;
+    const inlineBuildBtn = $('scraper-inline-build-plan-btn');
+    if (inlineBuildBtn) {
+        inlineBuildBtn.classList.toggle('hidden', !showBuild);
+        inlineBuildBtn.disabled = state.loading || state.planBusy || !showBuild;
+        inlineBuildBtn.classList.toggle('btn-disabled', state.loading || state.planBusy || !showBuild);
+        inlineBuildBtn.textContent = state.planBusy ? '识别中...' : '生成预览';
+    }
+    const buildBtn = $('scraper-build-plan-btn');
+    if (buildBtn) {
+        buildBtn.disabled = state.loading || state.planBusy || !showBuild;
+        buildBtn.classList.toggle('btn-disabled', state.loading || state.planBusy || !showBuild);
+        buildBtn.textContent = state.planBusy ? '识别中...' : '生成预览';
+        buildBtn.title = state.planBusy
+            ? '正在识别文件并生成预览'
+            : (showBuild ? '生成命名预览' : '请先选择要刮削的文件或文件夹');
+    }
 }
 
 function renderMoveBuffer() {
@@ -568,6 +636,21 @@ function getTmdbDisplayTitle(binding = state.tmdb) {
     return `${title || '--'}${year ? ` (${year})` : ''}`;
 }
 
+function getBoundTmdbKey(binding = state.tmdb) {
+    const item = binding && typeof binding === 'object' ? binding : {};
+    const id = Number(item.tmdb_id || item.id || 0) || 0;
+    if (id <= 0) return '';
+    const mediaType = (item.tmdb_media_type || item.media_type) === 'tv' ? 'tv' : 'movie';
+    return `${mediaType}:${id}`;
+}
+
+function getManualResultTmdbKey(item = {}) {
+    const id = Number(item.id || item.tmdb_id || 0) || 0;
+    if (id <= 0) return '';
+    const mediaType = item.media_type === 'tv' ? 'tv' : 'movie';
+    return `${mediaType}:${id}`;
+}
+
 function getTmdbSeasonCount(binding = state.tmdb) {
     const item = binding && typeof binding === 'object' ? binding : {};
     const map = item.tmdb_season_episode_map || item.season_episode_map || {};
@@ -684,7 +767,7 @@ function syncFolderRenameControl() {
     label?.classList.toggle('is-disabled', !wholeFolderMode);
     if (label) {
         label.title = wholeFolderMode
-            ? '仅在选中整个剧集文件夹时可用。若该文件夹正在被订阅任务使用，重命名后请到订阅里重新选择新的保存路径。'
+            ? '仅在选中整个剧集文件夹时可用。'
             : '仅在选中整个剧集文件夹时可用';
     }
 }
@@ -809,6 +892,7 @@ function renderIdentify() {
         } else {
             manualResults.innerHTML = state.manualResults.slice(0, 8).map((item, index) => {
                 const typeLabel = item.media_type === 'tv' ? '电视剧' : '电影';
+                const isBound = getBoundTmdbKey() && getBoundTmdbKey() === getManualResultTmdbKey(item);
                 return `
                     <div class="scraper-manual-result">
                         ${renderPoster(item)}
@@ -817,7 +901,7 @@ function renderIdentify() {
                             <span>${escapeHtml(typeLabel)}${item.year ? ` / ${escapeHtml(item.year)}` : ''}${item.vote_average ? ` / 评分 ${escapeHtml(String(item.vote_average))}` : ''}</span>
                             ${item.overview ? `<p>${escapeHtml(item.overview)}</p>` : ''}
                         </div>
-                        <button type="button" class="scraper-compact-btn" data-scraper-manual-index="${index}">绑定</button>
+                        <button type="button" class="scraper-compact-btn ${isBound ? 'scraper-manual-result-bound btn-disabled' : ''}" data-scraper-manual-index="${index}" ${isBound ? 'disabled aria-pressed="true"' : ''}>${isBound ? '已绑定' : '绑定'}</button>
                     </div>
                 `;
             }).join('');
@@ -835,6 +919,7 @@ function renderIdentify() {
     syncEpisodeModeControl();
     syncFileInfoControls();
     syncFolderScopedControls();
+    syncBuildPlanControls();
 }
 
 function collectOptions() {
@@ -863,16 +948,7 @@ function renderPlan() {
     const executeBtn = $('scraper-execute-btn');
     const plan = state.plan || null;
     const selectedReadyCount = getSelectedReadyPlanCount();
-    const selectedEntries = getSelectedEntries();
-    const hasBinding = !!(state.tmdb && Number(state.tmdb.tmdb_id || state.tmdb.id || 0) > 0);
-    const inlineBuildBtn = $('scraper-inline-build-plan-btn');
-    if (inlineBuildBtn) {
-        const showBuild = selectedEntries.length > 0 && hasBinding && !getPlanActions().length;
-        inlineBuildBtn.classList.toggle('hidden', !showBuild);
-        inlineBuildBtn.disabled = state.planBusy || !showBuild;
-        inlineBuildBtn.classList.toggle('btn-disabled', state.planBusy || !showBuild);
-        inlineBuildBtn.textContent = state.planBusy ? '生成中...' : '生成预览';
-    }
+    syncBuildPlanControls();
     const clearPlanBtn = $('scraper-clear-plan-btn');
     if (clearPlanBtn) {
         const showClear = getPlanActions().length > 0;
@@ -895,8 +971,8 @@ function renderPlan() {
     }
     if (!summary || !list) return;
     if (state.planBusy) {
-        summary.textContent = '正在生成 dry-run 预览...';
-        list.innerHTML = '';
+        summary.textContent = '正在识别文件并生成预览，请稍候...';
+        list.innerHTML = '<div class="scraper-empty-row">识别中，请稍候...</div>';
         return;
     }
     if (!plan) {
@@ -1092,7 +1168,7 @@ async function createFolder() {
 }
 
 async function renameSelected() {
-    const selected = getSelectedEntries();
+    const selected = getEffectiveSelectedEntries();
     if (selected.length !== 1 || !selected[0]?.is_dir) {
         showToast('请选择一个文件夹进行重命名', { tone: 'warn', duration: 2400, placement: 'top-center' });
         return;
@@ -1105,7 +1181,29 @@ async function renameSelected() {
         confirmText: '保存',
     });
     if (!name || name === target.name) return;
+    const oldPath = getSelectionPath(target);
+    const newPath = normalizePath(joinPath(getSelectionParentPath(target), name));
     try {
+        if (oldPath && newPath) {
+            let warning = '';
+            try {
+                const warningData = await window.MediaHubApi.postJson(`/scraper/${encodeURIComponent(state.provider)}/rename-warning`, {
+                    old_path: oldPath,
+                    new_path: newPath,
+                });
+                warning = String(warningData?.warning || '').trim();
+            } catch (error) {
+                showToast(`检查订阅保存路径失败：${error.message || '未知错误'}`, { tone: 'error', duration: 3200, placement: 'top-center' });
+                return;
+            }
+            if (warning) {
+                const ok = await showConfirm(warning, {
+                    title: '订阅保存路径提醒',
+                    confirmText: '继续重命名',
+                });
+                if (!ok) return;
+            }
+        }
         await window.MediaHubApi.postJson(`/scraper/${encodeURIComponent(state.provider)}/rename`, {
             entry_id: target.id,
             parent_id: target.parent_id || state.cid,
@@ -1119,7 +1217,7 @@ async function renameSelected() {
 }
 
 function prepareMove() {
-    const selected = getSelectedEntries();
+    const selected = getEffectiveSelectedEntries();
     if (!selected.length) {
         showToast('请先选择要移动的条目', { tone: 'warn', duration: 2200, placement: 'top-center' });
         return;
@@ -1166,7 +1264,7 @@ async function moveHere() {
 }
 
 async function deleteSelected() {
-    const selected = getSelectedEntries();
+    const selected = getEffectiveSelectedEntries();
     if (!selected.length) {
         showToast('请先选择要删除的条目', { tone: 'warn', duration: 2200, placement: 'top-center' });
         return;
@@ -1190,7 +1288,7 @@ async function deleteSelected() {
 }
 
 async function identifySelected() {
-    const entries = getSelectedEntries();
+    const entries = getEffectiveSelectedEntries();
     if (!entries.length) {
         showToast('请先选择要识别的文件或文件夹', { tone: 'warn', duration: 2400, placement: 'top-center' });
         return;
@@ -1289,7 +1387,8 @@ async function manualSearchTmdb() {
 }
 
 async function buildPlan() {
-    const entries = getSelectedEntries();
+    if (state.planBusy) return;
+    const entries = getEffectiveSelectedEntries();
     if (!entries.length) {
         showToast('请先选择要刮削的文件或文件夹', { tone: 'warn', duration: 2400, placement: 'top-center' });
         return;
@@ -1300,6 +1399,7 @@ async function buildPlan() {
     }
     state.planBusy = true;
     state.plan = null;
+    showToast('正在识别文件并生成预览...', { tone: 'info', duration: 1800, placement: 'top-center' });
     renderPlan();
     try {
         const options = collectOptions();
@@ -1351,9 +1451,20 @@ async function executePlan() {
         showToast('请先勾选要执行的预览项', { tone: 'warn', duration: 2400, placement: 'top-center' });
         return;
     }
-    const ok = await showConfirm(`确认执行已勾选的 ${selectedActions.length} 项重命名和移动吗？`, {
-        title: '确认执行',
-        confirmText: '执行',
+    const warningLines = selectedActions
+        .map(action => String(action.warning || '').trim())
+        .filter(Boolean);
+    let message = `确认执行已勾选的 ${selectedActions.length} 项重命名和移动吗？`;
+    let title = '确认执行';
+    let confirmText = '执行';
+    if (warningLines.length > 0) {
+        message = warningLines.join('\n');
+        title = '订阅保存路径提醒';
+        confirmText = '继续执行';
+    }
+    const ok = await showConfirm(message, {
+        title,
+        confirmText,
     });
     if (!ok) return;
     state.executeBusy = true;

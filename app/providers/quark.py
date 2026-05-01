@@ -726,16 +726,16 @@ def move_quark_entries(cookie: str, entry_ids: List[str], target_cid: str, sourc
     ids = [str(item or "").strip() for item in (entry_ids or []) if str(item or "").strip()]
     if not ids:
         raise RuntimeError("请选择要移动的文件")
-    source_id = str(source_cid or "").strip() or "0"
     target_id = str(target_cid or "0").strip() or "0"
     try:
         headers = _build_quark_headers(normalized_cookie, referer="https://pan.quark.cn/")
         url = _build_quark_api_url("/1/clouddrive/file/move")
+        # Quark derives the source directory from file ids here; current_dir_fid
+        # conflicts with filelist and causes "不能同时存在值" errors.
         response = _request_quark_json_payload(
             url,
             {
                 "action_type": 1,
-                "current_dir_fid": source_id,
                 "to_pdir_fid": target_id,
                 "filelist": ids,
                 "fid_list": ids,

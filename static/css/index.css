@@ -9956,6 +9956,16 @@
             cursor: not-allowed;
         }
 
+        .scraper-manual-result-bound.btn-disabled,
+        .scraper-manual-result-bound:disabled {
+            opacity: 1;
+            cursor: default;
+            filter: none;
+            border-color: rgba(16, 185, 129, 0.42);
+            background: rgba(6, 95, 70, 0.2);
+            color: #d1fae5;
+        }
+
         .scraper-input,
         .scraper-select {
             min-height: 38px;
@@ -10908,6 +10918,13 @@
             background: #fff1f2;
             border-color: #fda4af;
             color: #be123c;
+        }
+
+        html.theme-day .scraper-manual-result-bound.btn-disabled,
+        html.theme-day .scraper-manual-result-bound:disabled {
+            background: #f0fdf4;
+            border-color: #86efac;
+            color: #166534;
         }
 
         html.theme-day .scraper-keyword-chip {

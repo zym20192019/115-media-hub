@@ -9,6 +9,7 @@ from ..core import parse_int
 from ..services.scraper import (
     build_scraper_providers_payload,
     build_scraper_rename_plan,
+    check_scraper_folder_rename_warning,
     create_scraper_folder,
     create_scraper_job_from_plan,
     delete_scraper_entries,
@@ -72,6 +73,19 @@ async def rename_scraper_entry_endpoint(provider: str, request: Request) -> Dict
         return JSONResponse(status_code=400, content={"ok": False, "msg": "新名称不能为空"})
     try:
         return await asyncio.to_thread(rename_scraper_entry, provider, entry_id, parent_id, name)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/{provider}/rename-warning")
+async def check_scraper_folder_rename_warning_endpoint(provider: str, request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    old_path = str(data.get("old_path", "") or "").strip()
+    new_path = str(data.get("new_path", "") or "").strip()
+    if not old_path or not new_path:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "文件夹路径无效"})
+    try:
+        return await asyncio.to_thread(check_scraper_folder_rename_warning, provider, old_path, new_path)
     except Exception as exc:
         return _error_response(exc)
 

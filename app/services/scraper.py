@@ -166,13 +166,15 @@ def _compact_scraper_entry(entry: Dict[str, Any], parent_id: str = "", parent_pa
     if not entry_id or not name:
         return {}
     effective_parent = str(item.get("parent_id", "") or parent_id or "0").strip() or "0"
-    path = normalize_relative_path(join_relative_path(parent_path, name))
+    effective_parent_path = normalize_relative_path(str(item.get("parent_path", "") or parent_path or "").strip())
+    path = normalize_relative_path(str(item.get("path", "") or "").strip()) or normalize_relative_path(join_relative_path(effective_parent_path, name))
     payload: Dict[str, Any] = {
         "id": entry_id,
         "name": name,
         "is_dir": is_dir,
         "size": parse_int(item.get("size") or 0),
         "parent_id": effective_parent,
+        "parent_path": effective_parent_path,
         "path": path,
         "modified_at": str(item.get("modified_at", "") or "").strip(),
     }
@@ -181,6 +183,72 @@ def _compact_scraper_entry(entry: Dict[str, Any], parent_id: str = "", parent_pa
     else:
         payload["fid"] = str(item.get("fid", "") or entry_id).strip() or entry_id
     return payload
+
+
+def _scraper_entry_path(entry: Dict[str, Any]) -> str:
+    item = entry if isinstance(entry, dict) else {}
+    path = normalize_relative_path(str(item.get("path", "") or "").strip())
+    if path:
+        return path
+    parent_path = normalize_relative_path(str(item.get("parent_path", "") or "").strip())
+    name = str(item.get("name", "") or "").strip()
+    return normalize_relative_path(join_relative_path(parent_path, name))
+
+
+def _scraper_path_depth(path: str) -> int:
+    normalized = normalize_relative_path(str(path or "").strip())
+    return len([part for part in normalized.split("/") if part])
+
+
+def _is_scraper_path_descendant(path: str, ancestor_path: str) -> bool:
+    normalized_path = normalize_relative_path(str(path or "").strip())
+    normalized_ancestor = normalize_relative_path(str(ancestor_path or "").strip())
+    if not normalized_path or not normalized_ancestor:
+        return False
+    return normalized_path == normalized_ancestor or normalized_path.startswith(f"{normalized_ancestor}/")
+
+
+def _normalize_scraper_selected_entries(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    for raw in selected or []:
+        item = raw if isinstance(raw, dict) else {}
+        entry = _compact_scraper_entry(
+            item,
+            str(item.get("parent_id", "") or "0"),
+            normalize_relative_path(str(item.get("parent_path", "") or "")),
+        )
+        if not entry:
+            continue
+        entry["path"] = _scraper_entry_path(entry)
+        candidates.append(entry)
+
+    if not candidates:
+        return []
+
+    candidates.sort(
+        key=lambda item: (
+            _scraper_path_depth(str(item.get("path", "") or "")),
+            0 if item.get("is_dir") else 1,
+            str(item.get("path", "") or "").lower(),
+            str(item.get("id", "") or ""),
+        )
+    )
+    normalized: List[Dict[str, Any]] = []
+    seen_ids: Set[str] = set()
+    seen_paths: Set[str] = set()
+    for entry in candidates:
+        entry_id = str(entry.get("id", "") or "").strip()
+        entry_path = _scraper_entry_path(entry)
+        if not entry_id or not entry_path:
+            continue
+        if entry_id in seen_ids or entry_path in seen_paths:
+            continue
+        if any(existing.get("is_dir") and _is_scraper_path_descendant(entry_path, str(existing.get("path", "") or "")) for existing in normalized):
+            continue
+        normalized.append(entry)
+        seen_ids.add(entry_id)
+        seen_paths.add(entry_path)
+    return normalized
 
 
 def list_scraper_entries(provider: str, cid: str = "0", force_refresh: bool = False, search: str = "") -> Dict[str, Any]:
@@ -224,6 +292,22 @@ def rename_scraper_entry(provider: str, entry_id: str, parent_id: str, name: str
     result = _rename_provider_entry(normalized, cookie, entry_id, name, parent_id)
     _invalidate_provider_parent(normalized, parent_id)
     return {"ok": True, "provider": normalized, "entry": result}
+
+
+def check_scraper_folder_rename_warning(provider: str, old_path: str, new_path: str) -> Dict[str, Any]:
+    normalized = normalize_scraper_provider(provider) or "115"
+    normalized_old_path = normalize_relative_path(str(old_path or "").strip())
+    normalized_new_path = normalize_relative_path(str(new_path or "").strip())
+    if not normalized_old_path or not normalized_new_path:
+        raise RuntimeError("文件夹路径无效")
+    warning = _collect_scraper_subscription_rename_warning(normalized, normalized_old_path, normalized_new_path)
+    return {
+        "ok": True,
+        "provider": normalized,
+        "old_path": normalized_old_path,
+        "new_path": normalized_new_path,
+        "warning": warning,
+    }
 
 
 def move_scraper_entries(provider: str, entry_ids: List[str], target_cid: str, source_cid: str = "") -> Dict[str, Any]:
@@ -450,7 +534,7 @@ def _score_tmdb_candidate(query: str, year: str, item: Dict[str, Any]) -> int:
 
 def identify_scraper_media(payload: Dict[str, Any]) -> Dict[str, Any]:
     provider = normalize_scraper_provider(payload.get("provider", "115")) or "115"
-    selected = payload.get("entries", []) if isinstance(payload.get("entries"), list) else []
+    selected = _normalize_scraper_selected_entries(payload.get("entries", []) if isinstance(payload.get("entries"), list) else [])
     names = [str(item.get("path") or item.get("name") or "").strip() for item in selected if isinstance(item, dict)]
     if not names:
         return {"ok": True, "provider": provider, "query": "", "media_type": "movie", "year": "", "keywords": [], "items": [], "candidates": []}
@@ -556,7 +640,7 @@ def _build_scraper_media_titles(tmdb: Dict[str, Any], options: Dict[str, Any], f
 
 
 def _resolve_scraper_selection_mode(selected: List[Dict[str, Any]], options: Dict[str, Any]) -> str:
-    items = [item for item in (selected or []) if isinstance(item, dict)]
+    items = _normalize_scraper_selected_entries(selected)
     single_folder_selection = len(items) == 1 and bool(items[0].get("is_dir"))
     requested = str((options if isinstance(options, dict) else {}).get("selection_mode", "") or "").strip().lower()
     if requested == "folder" and single_folder_selection:
@@ -695,20 +779,21 @@ def _is_scraper_path_related(left_path: str, right_path: str) -> bool:
     return normalized_left.startswith(f"{normalized_right}/") or normalized_right.startswith(f"{normalized_left}/")
 
 
-def _collect_scraper_subscription_rename_warning(
+def _collect_scraper_subscription_path_warning(
     provider: str,
-    old_path: str,
-    new_path: str,
+    candidate_paths: List[str],
+    *,
+    kind: str = "generic",
 ) -> str:
     normalized_provider = normalize_scraper_provider(provider) or "115"
-    normalized_old_path = normalize_relative_path(str(old_path or "").strip())
-    normalized_new_path = normalize_relative_path(str(new_path or "").strip())
-    if not normalized_old_path:
+    normalized_paths = unique_preserve_order(
+        [normalize_relative_path(str(item or "").strip()) for item in (candidate_paths or []) if normalize_relative_path(str(item or "").strip())]
+    )
+    if not normalized_paths:
         return ""
 
     cfg = get_config()
     tasks = cfg.get("subscription_tasks", []) if isinstance(cfg.get("subscription_tasks"), list) else []
-    matched_labels: List[str] = []
     for raw_task in tasks:
         task = normalize_subscription_task(raw_task or {})
         if not task.get("name"):
@@ -718,27 +803,35 @@ def _collect_scraper_subscription_rename_warning(
         task_savepath = normalize_relative_path(str(task.get("savepath", "") or "").strip())
         if not task_savepath:
             continue
-        if not _is_scraper_path_related(normalized_old_path, task_savepath):
-            continue
         label = str(task.get("title", "") or task.get("name", "") or "").strip() or "未命名任务"
-        if task_savepath and task_savepath != normalized_old_path:
-            label = f"{label}（{task_savepath}）"
-        matched_labels.append(label)
+        matched_path = ""
+        for candidate_path in normalized_paths:
+            if _is_scraper_path_related(candidate_path, task_savepath):
+                matched_path = candidate_path
+                break
+        if not matched_path:
+            continue
+        return f"文件夹【{matched_path}】正在被订阅任务【{label}】使用。"
 
-    unique_labels = unique_preserve_order(matched_labels)
-    if not unique_labels:
-        return ""
+    return ""
 
-    if len(unique_labels) <= 3:
-        task_text = "、".join(unique_labels)
+
+def _collect_scraper_subscription_rename_warning(provider: str, old_path: str, new_path: str) -> str:
+    return _collect_scraper_subscription_path_warning(provider, [old_path], kind="folder_rename")
+
+
+def _collect_scraper_action_warning(provider: str, action: Dict[str, Any]) -> str:
+    if bool(action.get("is_dir")):
+        folder_path = str(action.get("old_path", "") or "").strip()
     else:
-        task_text = "、".join(unique_labels[:3]) + f" 等 {len(unique_labels)} 个任务"
-
-    target_path_text = normalized_new_path or normalized_old_path or "--"
-    return (
-        f"该文件夹正在被订阅任务【{task_text}】使用。"
-        f"重命名后原订阅会失去目标文件夹，请到订阅里手动重新选择新的保存路径：{target_path_text}"
-    )
+        folder_path = str(action.get("target_parent_path", "") or "").strip()
+        if not folder_path:
+            new_path = normalize_relative_path(str(action.get("new_path", "") or "").strip())
+            folder_path = os.path.dirname(new_path).replace("\\", "/") if new_path else ""
+    if not folder_path:
+        old_path = normalize_relative_path(str(action.get("old_path", "") or "").strip())
+        folder_path = os.path.dirname(old_path).replace("\\", "/") if old_path else ""
+    return _collect_scraper_subscription_path_warning(provider, [folder_path], kind="folder_rename")
 
 
 def _expand_selected_scraper_entries(provider: str, cookie: str, selected: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[str]]:
@@ -791,7 +884,7 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
     options = payload.get("options") if isinstance(payload.get("options"), dict) else {}
     base_cid = str(payload.get("base_cid", "0") or "0").strip() or "0"
     base_path = normalize_relative_path(str(payload.get("base_path", "") or ""))
-    selected = payload.get("entries", []) if isinstance(payload.get("entries"), list) else []
+    selected = _normalize_scraper_selected_entries(payload.get("entries", []) if isinstance(payload.get("entries"), list) else [])
     if not base_path and selected:
         selected_parent_paths = {
             normalize_relative_path(str(item.get("parent_path", "") or "").strip())
@@ -855,10 +948,10 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "ready": bool(new_name and not action_issue),
             }
             if not action_issue:
-                action_warning = _collect_scraper_subscription_rename_warning(provider, old_path, action["new_path"])
+                action_warning = _collect_scraper_action_warning(provider, action)
                 if action_warning:
                     action["warning"] = action_warning
-                    warnings.append(f"{old_name or '--'}：{action_warning}")
+                    warnings.append(action_warning)
             if action_issue:
                 issues.append(f"{old_name or '--'}：{action_issue}")
             actions.append(action)
@@ -893,6 +986,10 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
             "warning": "",
             "ready": bool(target_path and not action_issue),
         }
+        action_warning = _collect_scraper_action_warning(provider, action)
+        if action_warning:
+            action["warning"] = action_warning
+            warnings.append(action_warning)
         if action_issue:
             issues.append(f"{entry.get('name', '--')}：{action_issue}")
         actions.append(action)

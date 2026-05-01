@@ -65,6 +65,13 @@ def _is_subscription_skipped_archive_file(name: str) -> bool:
     return normalized_name.rsplit(".", 1)[-1].lower() in {"zip", "rar"}
 
 
+def _is_subscription_skipped_audio_file(name: str) -> bool:
+    normalized_name = normalize_relative_path(str(name or "").strip())
+    if not normalized_name:
+        return False
+    return is_audio_file(normalized_name, AUDIO_EXTENSIONS)
+
+
 def _is_subscription_numeric_episode_quality_suffix(suffix: str) -> bool:
     normalized_suffix = str(suffix or "").strip().lower()
     if not normalized_suffix:
@@ -328,6 +335,8 @@ def _extract_task_episodes_from_file_entry(
     if not normalized_file_name:
         return set()
     if _is_subscription_skipped_archive_file(normalized_file_name):
+        return set()
+    if _is_subscription_skipped_audio_file(normalized_file_name):
         return set()
 
     file_parts = [part for part in normalized_file_name.split("/") if part]

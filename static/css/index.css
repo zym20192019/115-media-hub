@@ -10220,6 +10220,11 @@
             font-style: normal;
         }
 
+        .scraper-preview-target em.scraper-plan-warning {
+            display: block;
+            color: #fcd34d;
+        }
+
         .scraper-plan-badge {
             flex: 0 0 auto;
             border: 1px solid rgba(71, 85, 105, 0.78);
@@ -10420,11 +10425,31 @@
             border-top: 1px solid rgba(51, 65, 85, 0.72);
         }
 
+        .scraper-options {
+            display: flex;
+            flex-direction: column;
+            gap: 0.82rem;
+        }
+
         .scraper-field-label {
             color: #e2e8f0;
             font-size: 0.82rem;
             font-weight: 850;
             margin-bottom: 0.5rem;
+        }
+
+        .scraper-options-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.58rem;
+        }
+
+        .scraper-options-group-title {
+            color: #94a3b8;
+            font-size: 0.73rem;
+            font-weight: 850;
+            letter-spacing: 0.01em;
+            text-transform: uppercase;
         }
 
         .scraper-option-grid {
@@ -10470,6 +10495,10 @@
         .scraper-tag-grid label.is-disabled,
         .scraper-option-toggle.is-disabled {
             opacity: 0.55;
+        }
+
+        .scraper-option-field.hidden {
+            display: none;
         }
 
         .scraper-inspector-actions {
@@ -10815,6 +10844,10 @@
         html.theme-day .scraper-preview-status.is-warn {
             background: #fef3c7;
             border-color: #facc15;
+            color: #92400e;
+        }
+
+        html.theme-day .scraper-preview-target em.scraper-plan-warning {
             color: #92400e;
         }
 

@@ -112,38 +112,62 @@
 
                             <div class="scraper-options">
                                 <div class="scraper-field-label">命名选项</div>
-                                <div class="scraper-option-grid">
-                                    <label class="scraper-option-field">
-                                        <span>标题语言</span>
-                                        <select id="scraper-title-language" class="scraper-select">
-                                            <option value="auto">跟随 TMDB 配置</option>
-                                            <option value="zh">中文名</option>
-                                            <option value="en">英文名</option>
-                                        </select>
-                                    </label>
-                                    <label id="scraper-season-field" class="scraper-option-field hidden">
-                                        <span>电视剧季数</span>
-                                        <input id="scraper-season" type="number" min="1" max="99" value="1" class="scraper-input">
-                                    </label>
+
+                                <div class="scraper-options-group">
+                                    <div class="scraper-options-group-title">基础命名</div>
+                                    <div class="scraper-option-grid">
+                                        <label class="scraper-option-field">
+                                            <span>标题语言</span>
+                                            <select id="scraper-title-language" class="scraper-select">
+                                                <option value="auto">跟随 TMDB 配置</option>
+                                                <option value="zh">中文名</option>
+                                                <option value="en">英文名</option>
+                                            </select>
+                                        </label>
+                                        <label id="scraper-season-field" class="scraper-option-field hidden">
+                                            <span>默认季号</span>
+                                            <input id="scraper-season" type="number" min="1" max="99" value="1" class="scraper-input">
+                                        </label>
+                                        <label id="scraper-episode-mode-field" class="scraper-option-field hidden">
+                                            <span>集数识别方式</span>
+                                            <select id="scraper-episode-mode" class="scraper-select">
+                                                <option value="auto">跟随 TMDB</option>
+                                                <option value="seasonal">单季 / 按季号</option>
+                                                <option value="absolute">多季 / 连续编号</option>
+                                            </select>
+                                        </label>
+                                    </div>
                                 </div>
-                                <label class="scraper-option-toggle">
-                                    <input id="scraper-include-tmdb-id" type="checkbox" class="ui-checkbox ui-checkbox-sm">
-                                    <span>在媒体文件夹名中写入 TMDB ID</span>
-                                </label>
-                                <label id="scraper-rename-selected-folders-wrap" class="scraper-option-toggle">
-                                    <input id="scraper-rename-selected-folders" type="checkbox" class="ui-checkbox ui-checkbox-sm" checked>
-                                    <span>选中文件夹时同步预览文件夹重命名</span>
-                                </label>
-                                <label class="scraper-option-toggle">
-                                    <input id="scraper-preserve-file-info" type="checkbox" class="ui-checkbox ui-checkbox-sm">
-                                    <span>保留原文件名中的清晰度 / 片源 / 编码信息</span>
-                                </label>
-                                <div class="scraper-tag-grid" aria-label="保留扩展标签">
-                                    <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="resolution" checked disabled> 清晰度</label>
-                                    <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="source" checked disabled> 片源</label>
-                                    <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="dynamic_range" checked disabled> HDR/DV</label>
-                                    <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="video" disabled> 视频编码</label>
-                                    <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="audio" disabled> 音频规格</label>
+
+                                <div class="scraper-options-group">
+                                    <div class="scraper-options-group-title">文件细节</div>
+                                    <label class="scraper-option-toggle">
+                                        <input id="scraper-include-tmdb-id" type="checkbox" class="ui-checkbox ui-checkbox-sm">
+                                        <span>在媒体文件夹名中写入 TMDB ID</span>
+                                    </label>
+                                    <label class="scraper-option-toggle">
+                                        <input id="scraper-preserve-file-info" type="checkbox" class="ui-checkbox ui-checkbox-sm">
+                                        <span>保留原文件名中的清晰度 / 片源 / 编码信息</span>
+                                    </label>
+                                    <div class="scraper-tag-grid" aria-label="保留扩展标签">
+                                        <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="resolution" checked disabled> 清晰度</label>
+                                        <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="source" checked disabled> 片源</label>
+                                        <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="dynamic_range" checked disabled> HDR/DV</label>
+                                        <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="video" disabled> 视频编码</label>
+                                        <label><input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-tag="audio" disabled> 音频规格</label>
+                                    </div>
+                                </div>
+
+                                <div class="scraper-options-group">
+                                    <div class="scraper-options-group-title">目录处理</div>
+                                    <label id="scraper-use-season-subfolder-wrap" class="scraper-option-toggle">
+                                        <input id="scraper-use-season-subfolder" type="checkbox" class="ui-checkbox ui-checkbox-sm" checked>
+                                        <span>电视剧目录中创建 Season 子文件夹</span>
+                                    </label>
+                                    <label id="scraper-rename-selected-folders-wrap" class="scraper-option-toggle">
+                                        <input id="scraper-rename-selected-folders" type="checkbox" class="ui-checkbox ui-checkbox-sm" checked>
+                                        <span>选中单个文件夹时同步重命名文件夹</span>
+                                    </label>
                                 </div>
                             </div>
 

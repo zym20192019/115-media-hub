@@ -726,6 +726,7 @@ def move_quark_entries(cookie: str, entry_ids: List[str], target_cid: str, sourc
     ids = [str(item or "").strip() for item in (entry_ids or []) if str(item or "").strip()]
     if not ids:
         raise RuntimeError("请选择要移动的文件")
+    source_id = str(source_cid or "").strip() or "0"
     target_id = str(target_cid or "0").strip() or "0"
     try:
         headers = _build_quark_headers(normalized_cookie, referer="https://pan.quark.cn/")
@@ -734,7 +735,9 @@ def move_quark_entries(cookie: str, entry_ids: List[str], target_cid: str, sourc
             url,
             {
                 "action_type": 1,
+                "current_dir_fid": source_id,
                 "to_pdir_fid": target_id,
+                "filelist": ids,
                 "fid_list": ids,
                 "exclude_fids": [],
             },

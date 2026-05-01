@@ -581,6 +581,7 @@ def _format_tv_episode_code(task: Dict[str, Any], episodes: Set[int], default_se
 def _build_scraper_target_path(entry: Dict[str, Any], tmdb: Dict[str, Any], options: Dict[str, Any]) -> Tuple[str, str]:
     media_type = normalize_tmdb_media_type(tmdb.get("tmdb_media_type") or tmdb.get("media_type"), "movie")
     organize_into_media_folder = bool(options.get("organize_into_media_folder", True))
+    use_season_subfolder = bool(options.get("use_season_subfolder", True))
     _, ext = os.path.splitext(str(entry.get("name", "") or ""))
     tags = extract_scraper_tags(str(entry.get("name", "") or ""), options.get("preserve_tags", {})) if bool(options.get("preserve_file_info", False)) else []
     tag_suffix = _build_tag_suffix(tags)
@@ -599,6 +600,8 @@ def _build_scraper_target_path(entry: Dict[str, Any], tmdb: Dict[str, Any], opti
         file_name = sanitize_scraper_name(f"{file_title} - {episode_code}{tag_suffix}") + ext
         if not organize_into_media_folder:
             return file_name, ""
+        if not use_season_subfolder:
+            return normalize_relative_path(join_relative_path(folder_title, file_name)), ""
         return normalize_relative_path(join_relative_path(folder_title, f"Season {season_no:02d}", file_name)), ""
     file_name = sanitize_scraper_name(f"{file_title}{tag_suffix}") + ext
     if not organize_into_media_folder:
@@ -645,6 +648,62 @@ def _target_name_exists(provider: str, cookie: str, parent_id: str, target_name:
             continue
         return True
     return False
+
+
+def _is_scraper_path_related(left_path: str, right_path: str) -> bool:
+    normalized_left = normalize_relative_path(str(left_path or "").strip())
+    normalized_right = normalize_relative_path(str(right_path or "").strip())
+    if not normalized_left or not normalized_right:
+        return False
+    if normalized_left == normalized_right:
+        return True
+    return normalized_left.startswith(f"{normalized_right}/") or normalized_right.startswith(f"{normalized_left}/")
+
+
+def _collect_scraper_subscription_rename_warning(
+    provider: str,
+    old_path: str,
+    new_path: str,
+) -> str:
+    normalized_provider = normalize_scraper_provider(provider) or "115"
+    normalized_old_path = normalize_relative_path(str(old_path or "").strip())
+    normalized_new_path = normalize_relative_path(str(new_path or "").strip())
+    if not normalized_old_path:
+        return ""
+
+    cfg = get_config()
+    tasks = cfg.get("subscription_tasks", []) if isinstance(cfg.get("subscription_tasks"), list) else []
+    matched_labels: List[str] = []
+    for raw_task in tasks:
+        task = normalize_subscription_task(raw_task or {})
+        if not task.get("name"):
+            continue
+        if normalize_subscription_provider(task.get("provider", "115"), fallback="115") != normalized_provider:
+            continue
+        task_savepath = normalize_relative_path(str(task.get("savepath", "") or "").strip())
+        if not task_savepath:
+            continue
+        if not _is_scraper_path_related(normalized_old_path, task_savepath):
+            continue
+        label = str(task.get("title", "") or task.get("name", "") or "").strip() or "未命名任务"
+        if task_savepath and task_savepath != normalized_old_path:
+            label = f"{label}（{task_savepath}）"
+        matched_labels.append(label)
+
+    unique_labels = unique_preserve_order(matched_labels)
+    if not unique_labels:
+        return ""
+
+    if len(unique_labels) <= 3:
+        task_text = "、".join(unique_labels)
+    else:
+        task_text = "、".join(unique_labels[:3]) + f" 等 {len(unique_labels)} 个任务"
+
+    target_path_text = normalized_new_path or normalized_old_path or "--"
+    return (
+        f"该文件夹正在被订阅任务【{task_text}】使用。"
+        f"重命名后原订阅会失去目标文件夹，请到订阅里手动重新选择新的保存路径：{target_path_text}"
+    )
 
 
 def _expand_selected_scraper_entries(provider: str, cookie: str, selected: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[str]]:
@@ -703,6 +762,7 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
     expanded_files, scan_issues = _expand_selected_scraper_entries(provider, cookie, selected)
     actions: List[Dict[str, Any]] = []
     issues: List[str] = list(scan_issues)
+    warnings: List[str] = []
     target_paths: Set[str] = set()
     target_folder_names: Set[str] = set()
     action_index = 1
@@ -739,8 +799,14 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "new_path": normalize_relative_path(join_relative_path(normalize_relative_path(str(item.get("parent_path", "") or "")), new_name)),
                 "target_parent_path": "",
                 "issue": action_issue,
+                "warning": "",
                 "ready": bool(new_name and not action_issue),
             }
+            if not action_issue:
+                action_warning = _collect_scraper_subscription_rename_warning(provider, old_path, action["new_path"])
+                if action_warning:
+                    action["warning"] = action_warning
+                    warnings.append(f"{old_name or '--'}：{action_warning}")
             if action_issue:
                 issues.append(f"{old_name or '--'}：{action_issue}")
             actions.append(action)
@@ -772,6 +838,7 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
             "new_path": target_path,
             "target_parent_path": target_parent_path,
             "issue": action_issue,
+            "warning": "",
             "ready": bool(target_path and not action_issue),
         }
         if action_issue:
@@ -785,6 +852,7 @@ def build_scraper_rename_plan(payload: Dict[str, Any]) -> Dict[str, Any]:
         "base_cid": base_cid,
         "actions": actions,
         "issues": issues,
+        "warnings": warnings,
         "ready": bool(actions) and ready_count == len(actions) and not issues,
         "ready_count": ready_count,
         "total_count": len(actions),

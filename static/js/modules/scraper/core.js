@@ -479,6 +479,7 @@ function renderEntries() {
                             <strong title="${escapeHtml(newPath)}">${escapeHtml(action.new_name || '--')}</strong>
                         </div>
                         ${action.issue ? `<em>${escapeHtml(action.issue)}</em>` : ''}
+                        ${action.warning ? `<em class="scraper-plan-warning">${escapeHtml(action.warning)}</em>` : ''}
                     </div>
                     <label class="scraper-preview-check">
                         <input type="checkbox" class="ui-checkbox ui-checkbox-sm" data-scraper-plan-check="${escapeHtml(String(actionIndex))}" ${checked ? 'checked' : ''} ${action.ready ? '' : 'disabled'}>
@@ -552,6 +553,20 @@ function getTmdbSeasonCount(binding = state.tmdb) {
     return Math.max(0, Number(item.tmdb_total_seasons || item.total_seasons || 0) || 0, ...mapSeasons);
 }
 
+function getSelectedEpisodeModeLabel(mode) {
+    const normalized = String(mode || 'auto').trim();
+    if (normalized === 'absolute') return '多季 / 连续编号';
+    if (normalized === 'seasonal') return '单季 / 按季号';
+    return '跟随 TMDB';
+}
+
+function getEffectiveEpisodeModeLabel() {
+    const selected = String($('scraper-episode-mode')?.value || 'auto').trim();
+    if (selected !== 'auto') return getSelectedEpisodeModeLabel(selected);
+    const tmdbMode = String(state.tmdb?.tmdb_episode_mode || '').trim();
+    return tmdbMode ? `跟随 TMDB（${getSelectedEpisodeModeLabel(tmdbMode)}）` : '跟随 TMDB';
+}
+
 function syncSeasonControl() {
     const field = $('scraper-season-field');
     const input = $('scraper-season');
@@ -569,6 +584,18 @@ function syncSeasonControl() {
     }
 }
 
+function syncEpisodeModeControl() {
+    const field = $('scraper-episode-mode-field');
+    const input = $('scraper-episode-mode');
+    if (!field || !input) return;
+    const isTv = (state.tmdb?.tmdb_media_type || state.tmdb?.media_type || $('scraper-manual-media-type')?.value) === 'tv';
+    field.classList.toggle('hidden', !isTv);
+    if (!isTv) return;
+    if (!['auto', 'seasonal', 'absolute'].includes(String(input.value || ''))) {
+        input.value = 'auto';
+    }
+}
+
 function syncFileInfoControls() {
     const enabled = !!$('scraper-preserve-file-info')?.checked;
     document.querySelectorAll('[data-scraper-tag]').forEach(input => {
@@ -577,22 +604,43 @@ function syncFileInfoControls() {
     });
 }
 
-function syncFolderRenameControl() {
-    const input = $('scraper-rename-selected-folders');
-    const label = $('scraper-rename-selected-folders-wrap');
+function syncSeasonSubfolderControl() {
+    const input = $('scraper-use-season-subfolder');
+    const label = $('scraper-use-season-subfolder-wrap');
     if (!input) return;
-    const hasSelectedFolder = getSelectedEntries().some(item => !!item.is_dir);
-    input.disabled = !hasSelectedFolder;
-    if (!hasSelectedFolder) {
+    const hasSingleFolder = getSelectedEntries().length === 1 && !!getSelectedEntries()[0]?.is_dir;
+    input.disabled = !hasSingleFolder;
+    if (!hasSingleFolder) {
         input.checked = false;
         input.dataset.autoDisabled = '1';
     } else if (input.dataset.autoDisabled === '1') {
         input.checked = true;
         delete input.dataset.autoDisabled;
     }
-    label?.classList.toggle('is-disabled', !hasSelectedFolder);
+    label?.classList.toggle('is-disabled', !hasSingleFolder);
     if (label) {
-        label.title = hasSelectedFolder ? '' : '只有选中整个文件夹时才可启用文件夹重命名';
+        label.title = hasSingleFolder ? '' : '仅在选中单个文件夹时可用';
+    }
+}
+
+function syncFolderRenameControl() {
+    const input = $('scraper-rename-selected-folders');
+    const label = $('scraper-rename-selected-folders-wrap');
+    if (!input) return;
+    const hasSingleFolder = getSelectedEntries().length === 1 && !!getSelectedEntries()[0]?.is_dir;
+    input.disabled = !hasSingleFolder;
+    if (!hasSingleFolder) {
+        input.checked = false;
+        input.dataset.autoDisabled = '1';
+    } else if (input.dataset.autoDisabled === '1') {
+        input.checked = true;
+        delete input.dataset.autoDisabled;
+    }
+    label?.classList.toggle('is-disabled', !hasSingleFolder);
+    if (label) {
+        label.title = hasSingleFolder
+            ? '仅在选中单个文件夹时可用。若该文件夹正在被订阅任务使用，重命名后请到订阅里重新选择新的保存路径。'
+            : '仅在选中单个文件夹时可用';
     }
 }
 
@@ -683,7 +731,7 @@ function renderIdentify() {
             summary.textContent = '正在识别 TMDB 信息...';
         } else if (state.tmdb) {
             const typeLabel = (state.tmdb.tmdb_media_type || state.tmdb.media_type) === 'tv' ? '电视剧' : '电影';
-            const seasonText = typeLabel === '电视剧' ? ` / 第 ${escapeHtml(String(Math.max(1, Number($('scraper-season')?.value || 1) || 1)))} 季` : '';
+            const seasonText = typeLabel === '电视剧' ? ` / 第 ${escapeHtml(String(Math.max(1, Number($('scraper-season')?.value || 1) || 1)))} 季 / ${escapeHtml(getEffectiveEpisodeModeLabel())}` : '';
             summary.innerHTML = `已绑定 <strong>${escapeHtml(typeLabel)} #${escapeHtml(String(state.tmdb.tmdb_id || state.tmdb.id || 0))}</strong>：${escapeHtml(getTmdbDisplayTitle())}${seasonText}`;
         } else if (identifyResult.msg) {
             summary.textContent = identifyResult.msg;
@@ -733,7 +781,9 @@ function renderIdentify() {
         mediaSelect.value = identifyResult.media_type === 'tv' ? 'tv' : 'movie';
     }
     syncSeasonControl();
+    syncEpisodeModeControl();
     syncFileInfoControls();
+    syncSeasonSubfolderControl();
     syncFolderRenameControl();
 }
 
@@ -745,7 +795,9 @@ function collectOptions() {
     return {
         title_language: String($('scraper-title-language')?.value || 'zh'),
         season: Math.max(1, Number($('scraper-season')?.value || 1) || 1),
+        episode_mode: String($('scraper-episode-mode')?.value || 'auto'),
         include_tmdb_id: !!$('scraper-include-tmdb-id')?.checked,
+        use_season_subfolder: !$('scraper-use-season-subfolder')?.disabled && !!$('scraper-use-season-subfolder')?.checked,
         rename_selected_folders: !$('scraper-rename-selected-folders')?.disabled && !!$('scraper-rename-selected-folders')?.checked,
         preserve_file_info: !!$('scraper-preserve-file-info')?.checked,
         preserve_tags: preserveTags,
@@ -802,9 +854,10 @@ function renderPlan() {
     const total = Number(plan.total_count || 0);
     const ready = Number(plan.ready_count || 0);
     const issues = Array.isArray(plan.issues) ? plan.issues : [];
+    const warnings = Array.isArray(plan.warnings) ? plan.warnings : [];
     summary.innerHTML = `
         <span class="${ready > 0 ? 'scraper-ok-text' : 'scraper-warn-text'}">${ready > 0 ? '可执行' : '需要处理'}</span>
-        <span> / 已勾选 ${escapeHtml(String(selectedReadyCount))} 项，${escapeHtml(String(ready))} / ${escapeHtml(String(total))} 项可执行${issues.length ? ` / ${escapeHtml(String(issues.length))} 个提示` : ''}</span>
+        <span> / 已勾选 ${escapeHtml(String(selectedReadyCount))} 项，${escapeHtml(String(ready))} / ${escapeHtml(String(total))} 项可执行${issues.length ? ` / ${escapeHtml(String(issues.length))} 个冲突` : ''}${warnings.length ? ` / ${escapeHtml(String(warnings.length))} 个提醒` : ''}</span>
     `;
     const actions = Array.isArray(plan.actions) ? plan.actions : [];
     if (!actions.length) {
@@ -1196,12 +1249,17 @@ async function buildPlan() {
     state.plan = null;
     renderPlan();
     try {
+        const options = collectOptions();
+        const tmdb = state.tmdb ? { ...state.tmdb } : null;
+        if (tmdb && options.episode_mode && options.episode_mode !== 'auto') {
+            tmdb.tmdb_episode_mode = options.episode_mode;
+        }
         const data = await window.MediaHubApi.postJson('/scraper/rename-plan', {
             provider: state.provider,
             base_cid: state.cid,
             entries,
-            tmdb: state.tmdb,
-            options: collectOptions(),
+            tmdb: tmdb || state.tmdb,
+            options,
         });
         state.plan = data;
         state.planSelections = new Set(
@@ -1210,11 +1268,17 @@ async function buildPlan() {
                 .map(action => Number(action.action_index || 0) || 0)
                 .filter(Boolean)
         );
-        showToast(Number(data.ready_count || 0) > 0 ? '预览已生成，请勾选确认后执行' : '预览没有可执行项，请处理冲突后再试', {
-            tone: Number(data.ready_count || 0) > 0 ? 'success' : 'warn',
-            duration: 2800,
-            placement: 'top-center',
-        });
+        const warningCount = Array.isArray(data.warnings) ? data.warnings.length : 0;
+        showToast(
+            Number(data.ready_count || 0) > 0
+                ? (warningCount > 0 ? `预览已生成，含 ${warningCount} 个提醒` : '预览已生成，请勾选确认后执行')
+                : '预览没有可执行项，请处理冲突后再试',
+            {
+                tone: Number(data.ready_count || 0) > 0 ? (warningCount > 0 ? 'warn' : 'success') : 'warn',
+                duration: 2800,
+                placement: 'top-center',
+            },
+        );
         closeIdentifyPanel();
     } catch (error) {
         showToast(`生成预览失败：${error.message || '未知错误'}`, { tone: 'error', duration: 3600, placement: 'top-center' });
@@ -1475,6 +1539,11 @@ function handleChange(event) {
     }
     if (event.target?.id === 'scraper-manual-media-type') {
         syncSeasonControl();
+        syncEpisodeModeControl();
+        return;
+    }
+    if (event.target?.id === 'scraper-episode-mode') {
+        clearPlan();
         return;
     }
     if (event.target?.id === 'scraper-preserve-file-info') {
@@ -1482,7 +1551,7 @@ function handleChange(event) {
         clearPlan();
         return;
     }
-    if (event.target?.matches('[data-scraper-tag], #scraper-title-language, #scraper-season, #scraper-include-tmdb-id, #scraper-rename-selected-folders')) {
+    if (event.target?.matches('[data-scraper-tag], #scraper-title-language, #scraper-season, #scraper-include-tmdb-id, #scraper-use-season-subfolder, #scraper-rename-selected-folders')) {
         clearPlan();
     }
 }

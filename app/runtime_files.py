@@ -10,6 +10,32 @@ LOG_ROTATE_MAX_BYTES = max(
 )
 LOG_ROTATE_BACKUPS = max(1, min(10, int(os.environ.get("LOG_ROTATE_BACKUPS", 2) or 2)))
 DEFAULT_EXTENSIONS = "mp4,mkv,avi,mov,wmv,flv,webm,vob,mpg,mpeg,ts,m2ts,mts,rmvb,rm,asf,3gp,m4v,f4v,iso"
+AUDIO_EXTENSIONS = {
+    "aac",
+    "ac3",
+    "aif",
+    "aiff",
+    "alac",
+    "amr",
+    "ape",
+    "au",
+    "dff",
+    "dsf",
+    "dts",
+    "flac",
+    "m4a",
+    "m4b",
+    "mka",
+    "mmf",
+    "mp3",
+    "ogg",
+    "opus",
+    "ra",
+    "ram",
+    "wav",
+    "weba",
+    "wma",
+}
 
 
 def normalize_remote_path(path: str) -> str:
@@ -51,6 +77,12 @@ def get_user_extensions(cfg: Dict[str, Any]) -> Set[str]:
 
 
 def is_video_file(name: str, extensions: Set[str]) -> bool:
+    if "." not in name:
+        return False
+    return name.rsplit(".", 1)[-1].lower() in extensions
+
+
+def is_audio_file(name: str, extensions: Set[str] = AUDIO_EXTENSIONS) -> bool:
     if "." not in name:
         return False
     return name.rsplit(".", 1)[-1].lower() in extensions

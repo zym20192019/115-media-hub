@@ -304,6 +304,21 @@ function setBusyButton(button, busy, busyText = '处理中...', idleText = '') {
     }
 }
 
+function scrollScraperToTop() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function syncScraperBackTopButton() {
+    const btn = $('scraper-back-top-btn');
+    const page = $('page-scraper');
+    if (!btn || !page) return;
+    const isVisible = !page.classList.contains('hidden');
+    const isModalLocked = document.body.classList.contains('body-scroll-lock');
+    const scrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
+    const shouldShow = isVisible && !isModalLocked && scrollTop > 360;
+    btn.classList.toggle('hidden', !shouldShow);
+}
+
 async function promptText({ title = '输入名称', message = '', defaultValue = '', confirmText = '确认' } = {}) {
     return new Promise((resolve) => {
         const modal = document.createElement('div');
@@ -1644,6 +1659,7 @@ function handleClick(event) {
     if (!actionButton) return;
     const action = String(actionButton.dataset.scraperAction || '').trim();
     if (action === 'refresh') void loadEntries({ force: true });
+    if (action === 'back-top') scrollScraperToTop();
     if (action === 'search') {
         state.search = String($('scraper-search-input')?.value || '').trim();
         void loadEntries();
@@ -1734,7 +1750,10 @@ function bindEvents() {
     root.dataset.scraperBound = '1';
     root.addEventListener('click', handleClick);
     root.addEventListener('change', handleChange);
+    window.addEventListener('scroll', syncScraperBackTopButton, { passive: true });
+    window.addEventListener('resize', syncScraperBackTopButton);
     document.addEventListener('keydown', handleGlobalKeydown);
+    window.syncScraperBackTopButton = syncScraperBackTopButton;
     $('scraper-search-input')?.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter' || event.isComposing) return;
         state.search = String(event.target.value || '').trim();
@@ -1767,6 +1786,7 @@ export async function ensureScraperManager({ firstVisit = false } = {}) {
     if (!state.initialized || firstVisit) {
         state.initialized = true;
         await refreshInitialData();
+        syncScraperBackTopButton();
         return;
     }
     renderProviderTabs();
@@ -1774,5 +1794,6 @@ export async function ensureScraperManager({ firstVisit = false } = {}) {
     renderIdentify();
     renderPlan();
     renderJobs();
+    syncScraperBackTopButton();
     if (hasActiveJobs()) scheduleJobsPoll();
 }

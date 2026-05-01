@@ -822,10 +822,12 @@
         window.addEventListener('scroll', () => {
             syncResourceBackTopButton();
             syncSettingsSaveDock();
+            window.syncScraperBackTopButton?.();
         }, { passive: true });
         window.addEventListener('resize', () => {
             syncResourceBackTopButton();
             syncSettingsSaveDock();
+            window.syncScraperBackTopButton?.();
             requestViewportMetricsSync();
         });
         document.addEventListener('visibilitychange', () => {

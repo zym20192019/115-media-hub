@@ -318,6 +318,7 @@
                 restoreWindowScrollTop(Math.max(0, Number(moduleScrollTopState[tab] || 0)));
                 syncResourceBackTopButton();
                 syncSettingsSaveDock();
+                window.syncScraperBackTopButton?.();
             });
         }
 
@@ -436,6 +437,7 @@
             }
             modalScrollLockCount += 1;
             syncResourceBackTopButton();
+            window.syncScraperBackTopButton?.();
         }
 
         function unlockPageScroll() {
@@ -449,6 +451,7 @@
             document.body.style.top = '';
             window.scrollTo(0, restoreY);
             syncResourceBackTopButton();
+            window.syncScraperBackTopButton?.();
         }
 
         function scrollResourceToTop() {

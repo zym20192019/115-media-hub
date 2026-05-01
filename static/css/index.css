@@ -2312,7 +2312,8 @@
                 radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 28%),
                 linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.9));
         }
-        .resource-back-top-btn {
+        .resource-back-top-btn,
+        .scraper-back-top-btn {
             position: fixed;
             right: max(1rem, env(safe-area-inset-right));
             bottom: max(1rem, env(safe-area-inset-bottom));
@@ -2334,7 +2335,8 @@
             transition: transform 0.18s ease, filter 0.18s ease;
             backdrop-filter: blur(6px);
         }
-        .resource-back-top-btn:hover {
+        .resource-back-top-btn:hover,
+        .scraper-back-top-btn:hover {
             transform: translateY(-1px);
             filter: brightness(1.05);
         }
@@ -5480,7 +5482,8 @@
             .resource-source-manager-bulk-actions {
                 grid-template-columns: 1fr;
             }
-            .resource-back-top-btn {
+            .resource-back-top-btn,
+            .scraper-back-top-btn {
                 right: max(0.75rem, env(safe-area-inset-right));
                 bottom: calc(env(safe-area-inset-bottom) + 6.85rem);
                 z-index: 49;
@@ -6474,13 +6477,15 @@
             border-color: rgba(148, 163, 184, 0.72);
             color: #0f172a;
         }
-        html.theme-day .resource-back-top-btn {
+        html.theme-day .resource-back-top-btn,
+        html.theme-day .scraper-back-top-btn {
             border-color: rgba(14, 116, 144, 0.3);
             background: linear-gradient(135deg, rgba(224, 242, 254, 0.96), rgba(186, 230, 253, 0.96));
             color: #075985;
             box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
         }
-        html.theme-day .resource-back-top-btn:hover {
+        html.theme-day .resource-back-top-btn:hover,
+        html.theme-day .scraper-back-top-btn:hover {
             color: #0c4a6e;
         }
         html.theme-day .resource-detail-text {

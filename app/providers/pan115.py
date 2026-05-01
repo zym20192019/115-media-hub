@@ -540,6 +540,60 @@ def move_115_entries(cookie: str, entry_ids: List[str], target_cid: str, source_
         raise
 
 
+def _is_115_mutation_success(response: Dict[str, Any]) -> bool:
+    payload = response if isinstance(response, dict) else {}
+    if bool(payload.get("state")) or bool(payload.get("success")):
+        return True
+    errno_value = None
+    for key in ("errno", "errNo", "err_no", "errcode"):
+        raw_value = payload.get(key)
+        if raw_value is None:
+            continue
+        text = str(raw_value).strip()
+        if not text:
+            continue
+        try:
+            errno_value = int(float(text))
+            break
+        except Exception:
+            continue
+    return errno_value == 0
+
+
+def _request_115_delete_payload(
+    cookie: str,
+    ids: List[str],
+    *,
+    parent_cid: str = "",
+    use_app_endpoint: bool = False,
+) -> Dict[str, Any]:
+    headers = {
+        "Cookie": cookie,
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://115.com/",
+        "Origin": "https://115.com",
+        "User-Agent": "Mozilla/5.0 115-media-hub",
+    }
+    id_field = "file_ids" if use_app_endpoint else "fid"
+    payload = {id_field: ",".join(ids)}
+    if parent_cid:
+        payload["pid"] = parent_cid
+    if use_app_endpoint:
+        payload["user_id"] = ""
+        return http_request_form_json(
+            "https://proapi.115.com/android/rb/delete",
+            payload,
+            timeout=60,
+            extra_headers=headers,
+        )
+    return http_request_form_json(
+        "https://webapi.115.com/rb/delete",
+        payload,
+        timeout=60,
+        extra_headers=headers,
+    )
+
+
 def delete_115_entries(cookie: str, entry_ids: List[str], parent_cid: str = "") -> Dict[str, Any]:
     normalized_cookie = str(cookie or "").strip()
     if not normalized_cookie:
@@ -548,31 +602,37 @@ def delete_115_entries(cookie: str, entry_ids: List[str], parent_cid: str = "") 
     if not ids:
         raise RuntimeError("请选择要删除的文件")
     try:
-        headers = {
-            "Cookie": normalized_cookie,
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://115.com/",
-            "Origin": "https://115.com",
-            "User-Agent": "Mozilla/5.0 115-media-hub",
-        }
-        response = http_request_form_json(
-            "https://proapi.115.com/android/rb/delete",
-            {"file_ids": ",".join(ids)},
-            timeout=60,
-            extra_headers=headers,
-        )
-        success = bool((response or {}).get("state")) or bool((response or {}).get("success"))
-        if not success:
-            detail = (
+        responses = []
+        last_error = ""
+        last_exc = None
+        for use_app_endpoint in (False, True):
+            try:
+                response = _request_115_delete_payload(
+                    normalized_cookie,
+                    ids,
+                    parent_cid=parent_cid,
+                    use_app_endpoint=use_app_endpoint,
+                )
+            except Exception as exc:
+                last_exc = exc
+                last_error = str(exc).strip() or "115 删除失败"
+                continue
+            responses.append(response)
+            if _is_115_mutation_success(response):
+                invalidate_115_entries_cache(parent_cid)
+                mark_cookie_health_success("115", trigger="runtime:delete_115_entries")
+                return {"ids": ids, "response": response}
+            last_error = (
                 str((response or {}).get("error", "")).strip()
                 or str((response or {}).get("msg", "")).strip()
                 or str((response or {}).get("message", "")).strip()
+                or str((response or {}).get("err_msg", "")).strip()
                 or "115 删除失败"
             )
-            raise RuntimeError(detail)
-        invalidate_115_entries_cache(parent_cid)
-        mark_cookie_health_success("115", trigger="runtime:delete_115_entries")
-        return {"ids": ids, "response": response}
+        detail = last_error or "115 删除失败"
+        if len(responses) > 1:
+            detail = f"{detail}（webapi/proapi 均未成功）"
+        raise RuntimeError(detail) from last_exc
     except Exception as exc:
         mark_cookie_health_failure("115", exc, trigger="runtime:delete_115_entries")
         raise

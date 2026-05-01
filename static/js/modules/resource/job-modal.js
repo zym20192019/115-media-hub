@@ -29,9 +29,9 @@
             return {
                 total: list.length,
                 active: list.filter(isScraperJobActive).length,
-                completed: list.filter(job => ['completed', 'rolled_back'].includes(String(job?.status || '').toLowerCase())).length,
+                completed: list.filter(job => String(job?.status || '').toLowerCase() === 'completed').length,
                 failed: list.filter(job => ['failed', 'partial', 'rollback_failed'].includes(String(job?.status || '').toLowerCase())).length,
-                rollback: list.filter(job => String(job?.status || '').toLowerCase().includes('rollback') || String(job?.status || '').toLowerCase() === 'rolled_back').length,
+                rollback: list.filter(job => String(job?.status || '').toLowerCase() === 'rolled_back').length,
             };
         }
 
@@ -88,9 +88,9 @@
         function isScraperJobVisible(job, filter = 'all') {
             const status = String(job?.status || '').toLowerCase();
             if (filter === 'active') return ['pending', 'running', 'rollback_running'].includes(status);
-            if (filter === 'completed') return ['completed', 'rolled_back'].includes(status);
+            if (filter === 'completed') return status === 'completed';
             if (filter === 'failed') return ['failed', 'partial', 'rollback_failed'].includes(status);
-            if (filter === 'rollback') return status.includes('rollback') || status === 'rolled_back';
+            if (filter === 'rollback') return status === 'rolled_back';
             return true;
         }
 
@@ -111,13 +111,39 @@
                 >${escapeHtml(option.label)} (${escapeHtml(String(option.count))})</button>
             `).join('');
             const clearMenu = document.getElementById('resource-job-clear-menu');
-            clearMenu?.classList.toggle('hidden', taskCenterTab !== 'resource');
+            clearMenu?.classList.toggle('hidden', taskCenterTab !== 'resource' && taskCenterTab !== 'scraper');
+            renderTaskCenterClearMenu();
             const note = document.getElementById('resource-job-modal-note');
             if (note) {
                 note.textContent = taskCenterTab === 'scraper'
                     ? '刮削任务会记录每次执行的重命名进度；文件列表默认折叠，可展开查看每个文件状态。'
                     : '默认加载最近任务，处理中任务置顶；筛选和加载更多会从后端分页读取。';
             }
+        }
+
+        function renderTaskCenterClearMenu() {
+            const menu = document.getElementById('resource-job-clear-menu');
+            if (!menu) return;
+            const isScraperTab = taskCenterTab === 'scraper';
+            const isResourceTab = taskCenterTab === 'resource';
+            const open = resourceJobClearMenuOpen;
+            const label = isScraperTab ? '清空刮削' : '清空';
+            const completedLabel = '清空已完成';
+            const failedLabel = isScraperTab ? '清空异常' : '清空失败';
+            const terminalLabel = isScraperTab ? '清空已回退' : '清空完成+失败';
+            const completedAction = isScraperTab ? 'clearCompletedScraperJobs' : 'clearCompletedResourceJobs';
+            const failedAction = isScraperTab ? 'clearFailedScraperJobs' : 'clearFailedResourceJobs';
+            const terminalAction = isScraperTab ? 'clearRollbackScraperJobs' : 'clearTerminalResourceJobs';
+            menu.innerHTML = `
+                <button id="resource-job-clear-toggle" type="button" onclick="toggleResourceJobClearMenu()" class="resource-job-modal-action resource-job-clear-toggle" aria-haspopup="menu" aria-expanded="${open ? 'true' : 'false'}">${escapeHtml(label)}</button>
+                <div id="resource-job-clear-dropdown" class="resource-job-clear-dropdown ${open ? '' : 'hidden'}" role="menu" aria-label="清理任务记录">
+                    <button id="resource-clear-completed-btn" type="button" onclick="${completedAction}()" class="resource-job-clear-item" role="menuitem">${escapeHtml(completedLabel)}</button>
+                    <button id="resource-clear-failed-btn" type="button" onclick="${failedAction}()" class="resource-job-clear-item" role="menuitem">${escapeHtml(failedLabel)}</button>
+                    <button id="resource-clear-terminal-btn" type="button" onclick="${terminalAction}()" class="resource-job-clear-item" role="menuitem">${escapeHtml(terminalLabel)}</button>
+                </div>
+            `;
+            syncResourceJobClearMenuState();
+            if (!isResourceTab && !isScraperTab) closeResourceJobClearMenu();
         }
 
         function renderResourceJobFilters(counts) {
@@ -130,7 +156,7 @@
                     { value: 'active', label: '处理中', count: scraperCounts.active },
                     { value: 'completed', label: '已完成', count: scraperCounts.completed },
                     { value: 'failed', label: '异常', count: scraperCounts.failed },
-                    { value: 'rollback', label: '回退', count: scraperCounts.rollback },
+                    { value: 'rollback', label: '已回退', count: scraperCounts.rollback },
                 ];
                 container.innerHTML = options.map(option => `
                     <button
@@ -169,7 +195,7 @@
             if (filter === 'active') return '当前没有正在处理的刮削任务。';
             if (filter === 'completed') return '当前没有已完成的刮削记录。';
             if (filter === 'failed') return '当前没有异常刮削任务。';
-            if (filter === 'rollback') return '当前没有回退相关任务。';
+            if (filter === 'rollback') return '当前没有已回退刮削任务。';
             return '还没有刮削任务，在刮削管理里执行重命名后会出现在这里。';
         }
 
@@ -467,38 +493,117 @@
         }
 
         function syncResourceJobClearMenuState() {
-            const jobCounts = getResourceJobCounts(resourceState.jobs || []);
-            const completedCount = Number(resourceState?.stats?.completed_job_count ?? jobCounts.completed ?? 0);
-            const failedCount = Number(resourceState?.stats?.failed_job_count ?? jobCounts.failed ?? 0);
-            const terminalCount = completedCount + failedCount;
+            const isScraperTab = taskCenterTab === 'scraper';
+            const jobCounts = isScraperTab ? getScraperJobDisplayCounts(scraperJobState.jobs || []) : getResourceJobCounts(resourceState.jobs || []);
+            const completedCount = Number(isScraperTab ? jobCounts.completed ?? 0 : resourceState?.stats?.completed_job_count ?? jobCounts.completed ?? 0);
+            const failedCount = Number(isScraperTab ? jobCounts.failed ?? 0 : resourceState?.stats?.failed_job_count ?? jobCounts.failed ?? 0);
+            const rollbackCount = Number(isScraperTab ? jobCounts.rollback ?? 0 : 0);
+            const terminalCount = completedCount + failedCount + rollbackCount;
 
             const toggleBtn = document.getElementById('resource-job-clear-toggle');
             if (toggleBtn) {
-                toggleBtn.textContent = terminalCount > 0 ? `清空（${terminalCount}）` : '清空';
+                toggleBtn.textContent = isScraperTab
+                    ? (terminalCount > 0 ? `清空刮削（${terminalCount}）` : '清空刮削')
+                    : (terminalCount > 0 ? `清空（${terminalCount}）` : '清空');
                 toggleBtn.disabled = terminalCount <= 0;
                 toggleBtn.classList.toggle('btn-disabled', terminalCount <= 0);
             }
 
             const completedBtn = document.getElementById('resource-clear-completed-btn');
             if (completedBtn) {
-                completedBtn.textContent = completedCount > 0 ? `清空已完成（${completedCount}）` : '清空已完成';
+                completedBtn.textContent = completedCount > 0
+                    ? `清空已完成（${completedCount}）`
+                    : '清空已完成';
                 completedBtn.disabled = completedCount <= 0;
                 completedBtn.classList.toggle('btn-disabled', completedCount <= 0);
             }
             const failedBtn = document.getElementById('resource-clear-failed-btn');
             if (failedBtn) {
-                failedBtn.textContent = failedCount > 0 ? `清空失败（${failedCount}）` : '清空失败';
+                failedBtn.textContent = failedCount > 0
+                    ? (isScraperTab ? `清空异常（${failedCount}）` : `清空失败（${failedCount}）`)
+                    : (isScraperTab ? '清空异常' : '清空失败');
                 failedBtn.disabled = failedCount <= 0;
                 failedBtn.classList.toggle('btn-disabled', failedCount <= 0);
             }
             const terminalBtn = document.getElementById('resource-clear-terminal-btn');
             if (terminalBtn) {
-                terminalBtn.textContent = terminalCount > 0 ? `清空完成+失败（${terminalCount}）` : '清空完成+失败';
-                terminalBtn.disabled = terminalCount <= 0;
-                terminalBtn.classList.toggle('btn-disabled', terminalCount <= 0);
+                const terminalButtonCount = isScraperTab ? rollbackCount : terminalCount;
+                terminalBtn.textContent = terminalButtonCount > 0
+                    ? (isScraperTab ? `清空已回退（${terminalButtonCount}）` : `清空完成+失败（${terminalButtonCount}）`)
+                    : (isScraperTab ? '清空已回退' : '清空完成+失败');
+                terminalBtn.disabled = terminalButtonCount <= 0;
+                terminalBtn.classList.toggle('btn-disabled', terminalButtonCount <= 0);
             }
 
             if (terminalCount <= 0) closeResourceJobClearMenu();
+        }
+
+        function getScraperJobClearMeta(scope = 'completed') {
+            const normalized = String(scope || 'completed').trim().toLowerCase();
+            const jobCounts = getScraperJobDisplayCounts(scraperJobState.jobs || []);
+            const completedCount = Number(jobCounts.completed ?? 0);
+            const failedCount = Number(jobCounts.failed ?? 0);
+            if (normalized === 'failed') {
+                return {
+                    scope: 'failed',
+                    count: failedCount,
+                    label: '异常',
+                    emptyText: '当前没有可清空的异常刮削记录',
+                    confirmText: '将清空异常刮削记录（只删除任务记录，不会删除网盘文件；执行中任务不会清理）。继续吗？',
+                };
+            }
+            if (normalized === 'rollback') {
+                const rollbackCount = Number(jobCounts.rollback ?? 0) || 0;
+                return {
+                    scope: 'rollback',
+                    count: rollbackCount,
+                    label: '已回退',
+                    emptyText: '当前没有可清空的已回退刮削记录',
+                    confirmText: '将清空已回退刮削记录（只删除任务记录，不会删除网盘文件；执行中任务不会清理）。继续吗？',
+                };
+            }
+            return {
+                scope: 'completed',
+                count: completedCount,
+                label: '已完成',
+                emptyText: '当前没有可清空的已完成刮削记录',
+                confirmText: '将清空已完成刮削记录（只删除任务记录，不会删除网盘文件；执行中任务不会清理）。继续吗？',
+            };
+        }
+
+        async function clearScraperJobs(scope = 'completed') {
+            const meta = getScraperJobClearMeta(scope);
+            closeResourceJobClearMenu();
+            if (meta.count <= 0) {
+                showToast(meta.emptyText, { tone: 'warn', duration: 2600, placement: 'top-center' });
+                return;
+            }
+            if (!(await showAppConfirm(meta.confirmText))) return;
+            try {
+                const data = await window.MediaHubApi.postJson('/scraper/jobs/clear', { scope: meta.scope });
+                await fetchScraperJobsState({ silent: true, limit: Math.max(20, scraperJobState.jobs.length || 20) });
+                if (taskCenterTab === 'scraper') renderResourceJobs();
+                const deleted = Number(data.deleted || 0);
+                if (deleted > 0) {
+                    showToast(`已清空 ${deleted} 条刮削${meta.label}记录`, { tone: 'success', duration: 2600, placement: 'top-center' });
+                } else {
+                    showToast(meta.emptyText, { tone: 'info', duration: 2600, placement: 'top-center' });
+                }
+            } catch (error) {
+                showToast(`清空失败：${error?.message || '请稍后重试'}`, { tone: 'error', duration: 3200, placement: 'top-center' });
+            }
+        }
+
+        async function clearCompletedScraperJobs() {
+            await clearScraperJobs('completed');
+        }
+
+        async function clearFailedScraperJobs() {
+            await clearScraperJobs('failed');
+        }
+
+        async function clearRollbackScraperJobs() {
+            await clearScraperJobs('rollback');
         }
 
         function applyScraperJobsState(data) {
@@ -607,4 +712,7 @@
             hasActiveScraperJobs,
             toggleScraperJobExpanded,
             rollbackScraperJobFromTaskCenter,
+            clearCompletedScraperJobs,
+            clearFailedScraperJobs,
+            clearRollbackScraperJobs,
         });

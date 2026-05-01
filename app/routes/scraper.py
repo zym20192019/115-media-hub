@@ -10,6 +10,7 @@ from ..services.scraper import (
     build_scraper_providers_payload,
     build_scraper_rename_plan,
     check_scraper_folder_rename_warning,
+    clear_scraper_jobs,
     create_scraper_folder,
     create_scraper_job_from_plan,
     delete_scraper_entries,
@@ -158,6 +159,19 @@ async def get_scraper_jobs_state_endpoint(request: Request) -> Dict[str, Any]:
     job_id = max(0, parse_int(request.query_params.get("job_id", 0), default=0))
     try:
         return await asyncio.to_thread(get_scraper_jobs_state, limit, job_id)
+    except Exception as exc:
+        return _error_response(exc)
+
+
+@router.post("/scraper/jobs/clear")
+async def clear_scraper_jobs_endpoint(request: Request) -> Dict[str, Any]:
+    data = await request.json()
+    scope = str((data or {}).get("scope", "completed") or "completed").strip().lower()
+    if scope not in ("completed", "failed", "rollback"):
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "清理范围不支持"})
+    try:
+        result = await asyncio.to_thread(clear_scraper_jobs, scope)
+        return {"ok": True, **result}
     except Exception as exc:
         return _error_response(exc)
 

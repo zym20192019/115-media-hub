@@ -25,6 +25,7 @@ from ..subscription_scoring import parse_resource_episode_meta
 SCRAPER_JOB_LIMIT_DEFAULT = 20
 SCRAPER_SCAN_MAX_DIRS = 80
 SCRAPER_SCAN_MAX_ENTRIES = 1200
+SCRAPER_JOB_ACTIVE_STATUSES = ("pending", "running", "rollback_running")
 SCRAPER_TAG_PATTERNS: Dict[str, List[Tuple[str, str]]] = {
     "resolution": [
         (r"\b(?:4320p|8k)\b", "8K"),
@@ -74,6 +75,15 @@ def normalize_scraper_provider(value: Any) -> str:
 
 def get_scraper_provider_label(provider: str) -> str:
     return "夸克" if provider == "quark" else "115"
+
+
+def normalize_scraper_job_clear_scope(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in ("failed", "fail", "error"):
+        return "failed"
+    if normalized in ("rollback", "rolled_back", "rollback_only"):
+        return "rollback"
+    return "completed"
 
 
 def _get_provider_cookie(provider: str, cfg: Optional[Dict[str, Any]] = None) -> str:
@@ -1156,15 +1166,64 @@ def get_scraper_jobs_state(limit: int = SCRAPER_JOB_LIMIT_DEFAULT, job_id: int =
     counts = {
         "total": sum(status_counts.values()),
         "active": sum(status_counts.get(status, 0) for status in ("pending", "running", "rollback_running")),
-        "completed": sum(status_counts.get(status, 0) for status in ("completed", "rolled_back")),
+        "completed": int(status_counts.get("completed", 0) or 0),
         "failed": sum(status_counts.get(status, 0) for status in ("failed", "partial", "rollback_failed")),
-        "rollback": sum(count for status, count in status_counts.items() if status.startswith("rollback") or status == "rolled_back"),
+        "rollback": int(status_counts.get("rolled_back", 0) or 0),
     }
     return {
         "ok": True,
         "jobs": jobs,
-        "active_jobs": [item for item in jobs if str(item.get("status", "") or "") in {"pending", "running", "rollback_running"}],
+        "active_jobs": [item for item in jobs if str(item.get("status", "") or "") in SCRAPER_JOB_ACTIVE_STATUSES],
         "job_counts": counts,
+    }
+
+
+def clear_scraper_jobs(scope: str = "completed") -> Dict[str, int]:
+    normalized_scope = normalize_scraper_job_clear_scope(scope)
+    if normalized_scope == "failed":
+        target_statuses = ["failed", "partial", "rollback_failed"]
+    elif normalized_scope == "rollback":
+        target_statuses = ["rolled_back"]
+    else:
+        target_statuses = ["completed"]
+
+    ensure_db()
+    conn = open_db()
+    cursor = conn.cursor()
+    placeholders = ",".join(["?"] * len(target_statuses))
+    cursor.execute(
+        f"SELECT COUNT(1) FROM scraper_job_actions WHERE job_id IN (SELECT id FROM scraper_jobs WHERE status IN ({placeholders}))",
+        tuple(target_statuses),
+    )
+    action_row = cursor.fetchone()
+    deleted_actions = int(action_row[0] if action_row else 0)
+    cursor.execute(
+        f"DELETE FROM scraper_job_actions WHERE job_id IN (SELECT id FROM scraper_jobs WHERE status IN ({placeholders}))",
+        tuple(target_statuses),
+    )
+    cursor.execute(
+        f"DELETE FROM scraper_jobs WHERE status IN ({placeholders})",
+        tuple(target_statuses),
+    )
+    deleted_jobs = int(cursor.rowcount or 0)
+
+    cursor.execute("SELECT COUNT(1) FROM scraper_jobs")
+    remaining_jobs_row = cursor.fetchone()
+    remaining_jobs = int(remaining_jobs_row[0] if remaining_jobs_row else 0)
+    if remaining_jobs == 0:
+        cursor.execute("DELETE FROM sqlite_sequence WHERE name = 'scraper_jobs'")
+    cursor.execute("SELECT COUNT(1) FROM scraper_job_actions")
+    remaining_actions_row = cursor.fetchone()
+    remaining_actions = int(remaining_actions_row[0] if remaining_actions_row else 0)
+    if remaining_actions == 0:
+        cursor.execute("DELETE FROM sqlite_sequence WHERE name = 'scraper_job_actions'")
+
+    conn.commit()
+    conn.close()
+    return {
+        "scope": normalized_scope,
+        "deleted": deleted_jobs,
+        "deleted_actions": deleted_actions,
     }
 
 

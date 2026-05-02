@@ -35,3 +35,9 @@ async def stream_events(request: Request) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/status-summary")
+async def get_status_summary(request: Request) -> Dict[str, Any]:
+    cfg = get_config()
+    return build_ui_state_payload(cfg)

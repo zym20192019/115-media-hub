@@ -1,8 +1,12 @@
 {
-  "version": "0.3.7",
-  "buildDate": "2026-05-02T00:51:36+08:00",
+  "version": "0.3.8",
+  "buildDate": "2026-05-02T13:50:00+08:00",
   "notes": [
-    "更新版本号到 0.3.7，整理文件重命名与识别退出入口。"
+    "SSE 增量推送：日常推送体积减少60-80%",
+    "降级轮询合并：SSE断开后单请求替代5请求",
+    "SSE 重连指数退避：1s→2s→4s→...→30s",
+    "静态资源版本化强缓存：二次访问秒开",
+    "请求优先级：用户操作期间暂停后台轮询"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

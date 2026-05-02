@@ -1661,7 +1661,23 @@
             }
         }
 
+        let resourcePollingPaused = false;
+
+        function pauseResourcePolling() {
+            resourcePollingPaused = true;
+            if (resourcePollTimer) {
+                window.clearTimeout(resourcePollTimer);
+                resourcePollTimer = null;
+            }
+        }
+
+        function resumeResourcePolling(delay = 500) {
+            resourcePollingPaused = false;
+            scheduleResourcePolling(delay);
+        }
+
         function scheduleResourcePolling(delayOverride = null) {
+            if (resourcePollingPaused) return;
             if (resourcePollTimer) {
                 window.clearTimeout(resourcePollTimer);
                 resourcePollTimer = null;
@@ -1731,6 +1747,19 @@
                 }, delay);
             };
         }
+
+        (function wrapPostJsonForRequestPriority() {
+            if (!window.MediaHubApi || typeof window.MediaHubApi.postJson !== 'function') return;
+            var originalPostJson = window.MediaHubApi.postJson.bind(window.MediaHubApi);
+            window.MediaHubApi.postJson = async function () {
+                pauseResourcePolling();
+                try {
+                    return await originalPostJson.apply(this, arguments);
+                } finally {
+                    resumeResourcePolling();
+                }
+            };
+        })();
 
         function formatTimeText(value) {
             if (!value) return '--';

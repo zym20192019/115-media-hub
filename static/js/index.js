@@ -1683,12 +1683,22 @@
                 try {
                     const payload = JSON.parse(event.data || '{}');
                     stopStatusFallbackPolling();
-                    applyMainState(payload.main);
-                    applyMonitorState(payload.monitor);
-                    applySubscriptionState(payload.subscription);
-                    applySign115State(payload.sign115);
-                    applyCookieHealthState(payload.cookie_health);
-                    applyResourceChannelSyncState(payload.resource_channel_sync);
+                    const changed = Array.isArray(payload._changed) ? payload._changed : null;
+                    if (changed) {
+                        if (changed.includes('main') && payload.main) applyMainState(payload.main);
+                        if (changed.includes('monitor') && payload.monitor) applyMonitorState(payload.monitor);
+                        if (changed.includes('subscription') && payload.subscription) applySubscriptionState(payload.subscription);
+                        if (changed.includes('sign115') && payload.sign115) applySign115State(payload.sign115);
+                        if (changed.includes('cookie_health') && payload.cookie_health) applyCookieHealthState(payload.cookie_health);
+                        if (changed.includes('resource_channel_sync') && payload.resource_channel_sync) applyResourceChannelSyncState(payload.resource_channel_sync);
+                    } else {
+                        if (payload.main) applyMainState(payload.main);
+                        if (payload.monitor) applyMonitorState(payload.monitor);
+                        if (payload.subscription) applySubscriptionState(payload.subscription);
+                        if (payload.sign115) applySign115State(payload.sign115);
+                        if (payload.cookie_health) applyCookieHealthState(payload.cookie_health);
+                        if (payload.resource_channel_sync) applyResourceChannelSyncState(payload.resource_channel_sync);
+                    }
                 } catch (err) {
                     console.warn('Status stream parse failed', err);
                 }

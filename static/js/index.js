@@ -1598,6 +1598,15 @@
                 if (currentTab === 'resource' && !document.hidden) {
                     scheduleResourcePolling(RESOURCE_SYNC_POLL_INTERVAL);
                 }
+                if (!resourceSyncBusy) {
+                    setResourceTgHealthState({
+                        visible: true,
+                        tone: 'loading',
+                        title: '频道同步后台运行中',
+                        meta: '',
+                        note: '',
+                    });
+                }
                 return;
             }
             if (!wasActive || !next.finished_at || next.finished_at === lastResourceChannelSyncFinishNotifiedAt) return;
@@ -1608,9 +1617,11 @@
             if (next.last_error) {
                 setResourceTgHealthResult({
                     tone: 'error',
-                    title: 'TG 刷新异常',
+                    title: '频道同步失败',
                     detail: next.last_error,
                     durationMs,
+                    includeLatency: false,
+                    detailFirst: true,
                 });
             } else {
                 applyResourceTgHealthFromSyncResult({ ...result, queued: false }, durationMs, resourceTgLastLatencyMs);
@@ -2007,17 +2018,17 @@
             return Math.min(30, Math.max(1, candidate));
         }
 
-        function formatDurationText(durationMs) {
+        function formatDurationText(durationMs, label = '总耗时') {
             const value = Number(durationMs || 0);
             if (!Number.isFinite(value) || value <= 0) return '';
-            if (value < 1000) return `总耗时 ${Math.max(1, Math.round(value))} ms`;
-            return `总耗时 ${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} s`;
+            if (value < 1000) return `${label} ${Math.max(1, Math.round(value))} ms`;
+            return `${label} ${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} s`;
         }
 
-        function formatLatencyText(latencyMs) {
+        function formatLatencyText(latencyMs, label = 'TG 延迟') {
             const value = Number(latencyMs || 0);
-            if (!Number.isFinite(value) || value <= 0) return 'TG 延迟 --';
-            return `TG 延迟 ${Math.max(1, Math.round(value))} ms`;
+            if (!Number.isFinite(value) || value <= 0) return `${label} --`;
+            return `${label} ${Math.max(1, Math.round(value))} ms`;
         }
 
         async function probeResourceTgLatency() {
@@ -2193,15 +2204,15 @@
                     }
                 }
             } else if (resourceSyncBusy) {
-                const baseText = '频道同步执行中';
-                text = tgText ? `${baseText} · ${tgText}` : baseText;
+                text = tgText || '频道同步提交中 · 正在检测 TG 代理延迟';
             } else if (tgText && !text) {
                 text = text ? `${text} ｜ ${tgText}` : tgText;
             }
 
             const hasText = !!text;
+            const channelSyncActive = !resourceSyncBusy && isResourceChannelSyncActive();
             hint.classList.toggle('hidden', !hasText);
-            hint.classList.toggle('is-loading', hasText && (resourceSearchBusy || resourceSyncBusy));
+            hint.classList.toggle('is-loading', hasText && (resourceSearchBusy || resourceSyncBusy || channelSyncActive));
             hint.classList.remove(
                 'resource-search-sub--loading',
                 'resource-search-sub--success',
@@ -2221,10 +2232,23 @@
             return Math.max(1, Math.round(performance.now() - Number(startedAt || 0)));
         }
 
-        function setResourceTgHealthResult({ tone, title, detail = '', durationMs = 0, latencyMs = 0 }) {
-            const totalText = formatDurationText(durationMs) || '总耗时 --';
-            const parts = [formatLatencyText(latencyMs), totalText];
-            if (detail) parts.push(detail);
+        function setResourceTgHealthResult({
+            tone,
+            title,
+            detail = '',
+            durationMs = 0,
+            latencyMs = 0,
+            durationLabel = '总耗时',
+            latencyLabel = 'TG 延迟',
+            includeDuration = true,
+            includeLatency = true,
+            detailFirst = false,
+        }) {
+            const parts = [];
+            if (includeLatency) parts.push(formatLatencyText(latencyMs, latencyLabel));
+            if (detailFirst && detail) parts.push(detail);
+            if (includeDuration) parts.push(formatDurationText(durationMs, durationLabel) || `${durationLabel} --`);
+            if (!detailFirst && detail) parts.push(detail);
             setResourceTgHealthState({
                 visible: true,
                 tone,
@@ -2235,13 +2259,20 @@
         }
 
         function showResourceTgHealthLoading(context) {
-            const actionText = context === 'sync'
-                ? '刷新中'
-                : '搜索中';
+            if (context === 'sync') {
+                setResourceTgHealthState({
+                    visible: true,
+                    tone: 'loading',
+                    title: '频道同步提交中',
+                    meta: '正在检测 TG 代理延迟',
+                    note: '',
+                });
+                return;
+            }
             setResourceTgHealthState({
                 visible: true,
                 tone: 'loading',
-                title: `TG ${actionText}`,
+                title: 'TG 搜索中',
                 meta: 'TG 延迟检测中 · 耗时 --',
                 note: '',
             });
@@ -2295,11 +2326,14 @@
 
             if (data?.queued) {
                 setResourceTgHealthResult({
-                    tone: data.accepted === false ? 'warning' : 'success',
-                    title: data.accepted === false ? 'TG 刷新已在执行' : 'TG 刷新已提交',
-                    detail: data.accepted === false ? '后台已有同步任务' : '后台同步中',
+                    tone: data.accepted === false ? 'warning' : 'loading',
+                    title: data.accepted === false ? '频道同步已在执行' : '频道同步已提交',
+                    detail: data.accepted === false ? '本次未重复提交' : '后台执行中',
                     durationMs,
                     latencyMs,
+                    durationLabel: '提交耗时',
+                    latencyLabel: 'TG 代理延迟',
+                    includeLatency: data.accepted !== false,
                 });
                 return;
             }
@@ -2307,10 +2341,11 @@
             if (!errors.length) {
                 setResourceTgHealthResult({
                     tone: 'success',
-                    title: 'TG 刷新完成',
-                    detail: `频道 ${synced} · 新增 ${inserted}${skipped ? ` · 缓存 ${skipped}` : ''}${pruned ? ` · 清理 ${pruned}` : ''}`,
+                    title: '频道同步完成',
+                    detail: `频道 ${synced} · 新增 ${inserted} · 缓存 ${skipped} · 清理 ${pruned}`,
                     durationMs,
-                    latencyMs,
+                    includeLatency: false,
+                    detailFirst: true,
                 });
                 return;
             }
@@ -2318,29 +2353,42 @@
             if (synced > 0 || skipped > 0) {
                 setResourceTgHealthResult({
                     tone: 'warning',
-                    title: 'TG 刷新波动',
+                    title: '频道同步完成但有异常',
                     detail: `成功 ${synced} · 异常 ${errors.length}`,
                     durationMs,
-                    latencyMs,
+                    includeLatency: false,
+                    detailFirst: true,
                 });
                 return;
             }
 
             setResourceTgHealthResult({
                 tone: 'error',
-                title: 'TG 刷新异常',
+                title: '频道同步失败',
                 detail: `${errors.length} 个频道失败`,
                 durationMs,
-                latencyMs,
+                includeLatency: false,
+                detailFirst: true,
             });
         }
 
         function applyResourceTgHealthFailure(context, durationMs = 0, latencyMs = 0) {
-            const actionText = context === 'sync' ? '刷新未完成' : '搜索未完成';
+            if (context === 'sync') {
+                setResourceTgHealthResult({
+                    tone: 'error',
+                    title: '频道同步提交失败',
+                    detail: 'TG 代理连接异常',
+                    durationMs,
+                    latencyMs,
+                    durationLabel: '提交耗时',
+                    latencyLabel: 'TG 代理延迟',
+                });
+                return;
+            }
             setResourceTgHealthResult({
                 tone: 'error',
                 title: 'TG 异常',
-                detail: actionText,
+                detail: '搜索未完成',
                 durationMs,
                 latencyMs,
             });

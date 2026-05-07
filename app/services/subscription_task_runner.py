@@ -53,6 +53,76 @@ def _build_subscription_matched_episode_log_tail(task: Dict[str, Any], episodes:
     return f"；命中集数：{episode_summary}" if episode_summary else ""
 
 
+def _format_subscription_episode_range_summary(episodes: Any) -> str:
+    normalized: List[int] = []
+    seen: Set[int] = set()
+    for raw_value in episodes or []:
+        try:
+            episode_no = max(0, int(raw_value or 0))
+        except (TypeError, ValueError):
+            continue
+        if episode_no <= 0 or episode_no in seen:
+            continue
+        seen.add(episode_no)
+        normalized.append(episode_no)
+    ordered = sorted(normalized)
+    if not ordered:
+        return ""
+
+    ranges: List[Tuple[int, int]] = []
+    range_start = ordered[0]
+    previous = ordered[0]
+    for episode_no in ordered[1:]:
+        if episode_no == previous + 1:
+            previous = episode_no
+            continue
+        ranges.append((range_start, previous))
+        range_start = episode_no
+        previous = episode_no
+    ranges.append((range_start, previous))
+    return "、".join(
+        f"E{start}" if start == end else f"E{start}-E{end}"
+        for start, end in ranges
+    )
+
+
+def _build_subscription_import_summary_log(
+    task: Dict[str, Any],
+    imported_episodes: Any,
+    *,
+    next_episode: int = 0,
+    total_episodes: int = 0,
+) -> Tuple[str, str]:
+    if str((task or {}).get("media_type", "movie") or "movie").strip().lower() != "tv":
+        return "", ""
+
+    episode_summary = _format_subscription_episode_range_summary(imported_episodes)
+    imported_episode_set: Set[int] = set()
+    for raw_value in imported_episodes or []:
+        try:
+            episode_no = max(0, int(raw_value or 0))
+        except (TypeError, ValueError):
+            continue
+        if episode_no > 0:
+            imported_episode_set.add(episode_no)
+    imported_count = len(imported_episode_set)
+    normalized_next = max(0, int(next_episode or 0))
+    normalized_total = max(0, int(total_episodes or 0))
+    progress_text = f"E{normalized_next}" if normalized_next > 0 else "--"
+    if normalized_total > 0:
+        progress_text = f"{progress_text} / {normalized_total}"
+
+    if episode_summary and imported_count > 0:
+        return (
+            f"导入汇总：本轮新增 {imported_count} 集：{episode_summary}；当前进度 {progress_text}",
+            "success",
+        )
+    return (
+        f"导入汇总：本轮未确认新增集数；当前进度 {progress_text}",
+        "info",
+    )
+
+
 def _format_subscription_share_scan_truncated_reason(reason: Any) -> str:
     labels = {
         "max_dirs": "目录数达到上限",
@@ -694,7 +764,7 @@ async def _write_subscription_task_overview(
             f"类型: {media_label} | 网盘: {provider_label} | 触发: {format_subscription_trigger(trigger)}"
         ),
         "info",
-        compact=f"订阅: {str(task.get('title', '') or task.get('name', '') or '--').strip()} | "
+        compact=f"任务 | {str(task.get('title', '') or task.get('name', '') or '--').strip()} | "
                 f"{media_label} | {provider_label} | {format_subscription_trigger(trigger)}",
     )
     await write_subscription_log(
@@ -703,7 +773,7 @@ async def _write_subscription_task_overview(
         + file_size_filter_tail
         + (f" | 排除词: {', '.join(exclude_keywords[:5])}" if exclude_keywords else ""),
         "info",
-        compact=f"保存路径: {str(task.get('savepath', '') or '--').strip()} | "
+        compact=f"配置 | 保存路径: {str(task.get('savepath', '') or '--').strip()} | "
                 f"批次收口: {batch_refresh_label}"
                 + (f" | 最小文件 {min_file_size_mb:g}MB" if min_file_size_mb > 0 else "")
                 + (f" | 排除词: {len(exclude_keywords)}个" if exclude_keywords else ""),
@@ -718,7 +788,7 @@ async def _write_subscription_task_overview(
         ),
         "info",
         compact=(
-            f"访问策略 | 候选上限 {int(scan_settings.get('candidate_scan_prefetch_limit', 0) or 0)} · "
+            f"配置 | 访问策略 | 候选上限 {int(scan_settings.get('candidate_scan_prefetch_limit', 0) or 0)} · "
             f"候选并发 {int(scan_settings.get('candidate_scan_concurrency', 1) or 1)} · "
             f"目录并发 {int(scan_settings.get('share_scan_concurrency', 1) or 1)} · "
             f"间隔 {float(scan_settings.get('share_scan_rate_limit_seconds', 0) or 0):g}s"
@@ -2054,6 +2124,14 @@ async def _run_subscription_task_quark(
             **search_stats,
         },
     )
+    import_summary_text, import_summary_level = _build_subscription_import_summary_log(
+        task,
+        imported_episode_list,
+        next_episode=next_episode,
+        total_episodes=next_total,
+    )
+    if import_summary_text:
+        await write_subscription_log(import_summary_text, import_summary_level)
     await write_subscription_log(detail, "success")
     try:
         notify_result = await push_subscription_success_notification(
@@ -4699,6 +4777,14 @@ async def run_subscription_task(
                 **search_stats,
             },
         )
+        import_summary_text, import_summary_level = _build_subscription_import_summary_log(
+            task,
+            imported_episode_list,
+            next_episode=next_episode,
+            total_episodes=next_total,
+        )
+        if import_summary_text:
+            await write_subscription_log(import_summary_text, import_summary_level)
         await write_subscription_log(detail, "success")
         try:
             notify_result = await push_subscription_success_notification(

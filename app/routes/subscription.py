@@ -23,7 +23,7 @@ async def get_subscription_status(request: Request) -> Dict[str, Any]:
 async def get_subscription_logs(request: Request) -> Dict[str, Any]:
     after = parse_int_param(request.query_params.get("after"), 0)
     before = parse_int_param(request.query_params.get("before"), 0)
-    limit = parse_int_param(request.query_params.get("limit"), SUBSCRIPTION_LOG_TASK_PAGE_LIMIT)
+    limit = parse_int_param(request.query_params.get("limit"), SUBSCRIPTION_LOG_PAGE_LIMIT)
     return build_subscription_log_page_payload(after=after, before=before, limit=limit)
 
 

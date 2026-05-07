@@ -8,8 +8,8 @@
             });
         }
 
-        const SUBSCRIPTION_LOG_RECENT_TASK_LIMIT = 3;
-        const SUBSCRIPTION_LOG_PAGE_TASK_LIMIT = 3;
+        const SUBSCRIPTION_LOG_RECENT_TASK_LIMIT = 1;
+        const SUBSCRIPTION_LOG_PAGE_TASK_LIMIT = 1;
         const SUBSCRIPTION_SCAN_RECOMMENDED_DEFAULTS = {
             '115': {
                 candidate_scan_prefetch_limit: 3,
@@ -35,6 +35,7 @@
         let subscriptionLogHydrated = false;
         let subscriptionLogLastPullAt = 0;
         let subscriptionLogTaskTotal = 0;
+        let subscriptionLogManualHistoryLoaded = false;
 
         function getSubscriptionStatusLabel(status) {
             const normalized = String(status || 'idle').trim().toLowerCase();
@@ -209,7 +210,7 @@
             box.innerHTML = logs.map(item => {
                 const displayItem = {
                     ...item,
-                    text: String(item?.text || item?.display_text || ''),
+                    text: String(item?.text || item?.raw_text || item?.display_text || ''),
                 };
                 return `<div class="${getLogEntryClass(displayItem)}">${formatMonitorLogHtml(displayItem)}</div>`;
             }).join('');
@@ -222,7 +223,7 @@
             return {
                 ...row,
                 seq: Number(row.seq || 0),
-                text: String(row.text || row.display_text || ''),
+                text: String(row.text || row.raw_text || row.display_text || ''),
                 display_text: String(row.display_text || row.text || ''),
                 raw_text: String(row.raw_text || ''),
                 level: String(row.level || 'info'),
@@ -339,11 +340,13 @@
             subscriptionLogHydrated = false;
             subscriptionLogLastPullAt = 0;
             subscriptionLogTaskTotal = 0;
+            subscriptionLogManualHistoryLoaded = false;
             lastSubscriptionLogSignature = '';
         }
 
         function trimSubscriptionLogWindow() {
             if (!subscriptionLogFollowTail) return;
+            if (subscriptionLogManualHistoryLoaded) return;
             const previousOldestSeq = subscriptionLogRows.length ? subscriptionLogRows[0].seq : 0;
             const blocks = buildSubscriptionLogBlocks(subscriptionLogRows);
             const nextRows = flattenSubscriptionLogBlocks(
@@ -361,9 +364,17 @@
             const loadMoreBtn = document.getElementById('subscription-log-load-more');
             if (!loadMoreBtn) return;
             const hasMore = !!subscriptionLogHasMoreBefore;
-            loadMoreBtn.classList.toggle('hidden', !hasMore);
             loadMoreBtn.disabled = !hasMore || subscriptionLogLoading;
-            loadMoreBtn.innerText = subscriptionLogLoading ? '加载中...' : '加载更早 3 条';
+            loadMoreBtn.classList.toggle('btn-disabled', !hasMore && !subscriptionLogLoading);
+            if (subscriptionLogLoading) {
+                loadMoreBtn.innerText = '加载中...';
+            } else if (hasMore) {
+                loadMoreBtn.innerText = `加载更早 ${SUBSCRIPTION_LOG_PAGE_TASK_LIMIT} 条`;
+            } else if (subscriptionLogRows.length) {
+                loadMoreBtn.innerText = '已到最早日志';
+            } else {
+                loadMoreBtn.innerText = '暂无历史日志';
+            }
         }
 
         function renderSubscriptionLogLoadSummary() {
@@ -371,7 +382,11 @@
             if (!summary) return;
             const loaded = countSubscriptionLogTaskBlocks();
             const total = Math.max(Number(subscriptionLogTaskTotal || 0) || 0, loaded);
-            summary.innerText = total > 0 ? `已加载 ${loaded} / ${total} 条` : '暂无任务日志';
+            if (total > 0) {
+                summary.innerText = `已加载 ${loaded} / ${total} 条`;
+            } else {
+                summary.innerText = '暂无任务日志';
+            }
         }
 
         function renderSubscriptionLogRows({ keepScroll = false } = {}) {
@@ -385,7 +400,7 @@
                 box.innerHTML = subscriptionLogRows.map(item => {
                     const displayItem = {
                         ...item,
-                        text: String(item?.text || item?.display_text || ''),
+                        text: String(item?.text || item?.raw_text || item?.display_text || ''),
                     };
                     return `<div class="${getLogEntryClass(displayItem)}">${formatMonitorLogHtml(displayItem)}</div>`;
                 }).join('');
@@ -413,11 +428,15 @@
                 params.set('limit', String(limit));
                 const payload = await window.MediaHubApi.getJson(`/subscription/logs?${params.toString()}`);
                 const rows = Array.isArray(payload.logs) ? payload.logs : [];
-                subscriptionLogTaskTotal = Math.max(
-                    Number(subscriptionLogTaskTotal || 0) || 0,
-                    Number(payload.task_block_total || 0) || 0,
-                );
+                if (prepend || before > 0) {
+                    subscriptionLogManualHistoryLoaded = true;
+                    subscriptionLogFollowTail = false;
+                }
                 mergeSubscriptionLogRows(rows, { prepend });
+                subscriptionLogTaskTotal = Math.max(
+                    Number(payload.task_block_total || 0) || 0,
+                    countSubscriptionLogTaskBlocks(),
+                );
                 if (prepend || before > 0 || after <= 0) {
                     subscriptionLogHasMoreBefore = !!payload.has_more_before;
                 } else {
@@ -459,7 +478,7 @@
                     return;
                 }
                 if (subscriptionLogPendingLatestSeq > subscriptionLogNewestSeq) {
-                    await fetchSubscriptionLogs({ after: subscriptionLogNewestSeq, limit: SUBSCRIPTION_LOG_PAGE_TASK_LIMIT });
+                    await fetchSubscriptionLogs({ limit: SUBSCRIPTION_LOG_RECENT_TASK_LIMIT });
                     if (subscriptionLogPendingLatestSeq > subscriptionLogNewestSeq) {
                         scheduleSubscriptionLogRefresh(subscriptionLogPendingLatestSeq);
                     }
@@ -470,11 +489,18 @@
         function applySubscriptionLogMeta(logMeta) {
             const meta = logMeta && typeof logMeta === 'object' ? logMeta : {};
             const latestSeq = Number(meta.latest_seq || meta.total || meta.latest?.seq || 0);
+            if (latestSeq > 0 && subscriptionLogNewestSeq > latestSeq) {
+                resetSubscriptionLogWindow();
+            }
             subscriptionLogTaskTotal = Math.max(
-                Number(subscriptionLogTaskTotal || 0) || 0,
                 Number(meta.task_block_total || 0) || 0,
+                countSubscriptionLogTaskBlocks(),
             );
+            if (subscriptionLogHydrated && subscriptionLogTaskTotal > countSubscriptionLogTaskBlocks()) {
+                subscriptionLogHasMoreBefore = true;
+            }
             renderSubscriptionLogLoadSummary();
+            updateSubscriptionLogLoadControl();
             subscriptionLogPendingLatestSeq = Math.max(subscriptionLogPendingLatestSeq, latestSeq);
             if (!subscriptionLogHydrated) {
                 scheduleSubscriptionLogRefresh(latestSeq);
@@ -490,13 +516,12 @@
             if (!box) return;
             const nearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 24;
             subscriptionLogFollowTail = nearBottom;
-            if (box.scrollTop <= 4 && subscriptionLogHasMoreBefore && !subscriptionLogLoading) {
-                void fetchSubscriptionLogs({ before: subscriptionLogOldestSeq, limit: SUBSCRIPTION_LOG_PAGE_TASK_LIMIT, prepend: true });
-            }
         }
 
         function loadEarlierSubscriptionLogs() {
             if (!subscriptionLogHasMoreBefore || subscriptionLogLoading) return;
+            subscriptionLogManualHistoryLoaded = true;
+            subscriptionLogFollowTail = false;
             void fetchSubscriptionLogs({ before: subscriptionLogOldestSeq, limit: SUBSCRIPTION_LOG_PAGE_TASK_LIMIT, prepend: true });
         }
 

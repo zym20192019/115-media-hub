@@ -1,9 +1,9 @@
 {
-  "version": "0.3.14",
-  "buildDate": "2026-05-07T19:21:05+08:00",
+  "version": "0.3.16",
+  "buildDate": "2026-05-08T01:31:28+08:00",
   "notes": [
-    "Webhook 跨域与 HTTPS 反代调用稳定性优化",
-    "订阅通知合并本轮文件夹监控结果"
+    "订阅成功日志新增本轮集数导入汇总",
+    "订阅导入汇总按是否新增集数区分颜色"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

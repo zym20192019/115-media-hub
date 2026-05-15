@@ -4,15 +4,16 @@ from ..memory import release_process_memory
 from .notify import push_monitor_success_notification
 
 def write_strm_file(target_file: str, url: str) -> bool:
+    next_url = str(url or "").strip()
     old_content = None
     if os.path.exists(target_file):
         with open(target_file, "r", encoding="utf-8", errors="ignore") as f:
-            old_content = f.read()
-    if old_content == url:
+            old_content = str(f.read() or "").strip()
+    if old_content == next_url:
         return False
     os.makedirs(os.path.dirname(target_file), exist_ok=True)
     with open(target_file, "w", encoding="utf-8") as f:
-        f.write(url)
+        f.write(next_url)
     return True
 
 

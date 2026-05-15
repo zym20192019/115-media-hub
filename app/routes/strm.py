@@ -18,9 +18,12 @@ _pick_code_path_cache_lock = threading.Lock()
 _pick_code_path_cache: Dict[str, Dict[str, Any]] = {}
 _folder_cid_path_cache_lock = threading.Lock()
 _folder_cid_path_cache: Dict[str, Dict[str, Any]] = {}
-_PICK_CODE_PATH_CACHE_TTL_SECONDS = max(
-    60,
-    min(24 * 60 * 60, int(os.environ.get("API_115_PICKCODE_CACHE_TTL_SECONDS", 2 * 60 * 60) or (2 * 60 * 60))),
+_pick_code_path_cache_ttl_raw = max(
+    0,
+    min(24 * 60 * 60, int(os.environ.get("API_115_PICKCODE_CACHE_TTL_SECONDS", 0) or 0)),
+)
+_PICK_CODE_PATH_CACHE_TTL_SECONDS = (
+    0 if _pick_code_path_cache_ttl_raw <= 0 else max(60, _pick_code_path_cache_ttl_raw)
 )
 _FOLDER_CID_PATH_CACHE_TTL_SECONDS = max(
     60,
@@ -448,6 +451,8 @@ def _build_pick_code_path_cache_key(cfg: Dict[str, Any], raw_path: str) -> str:
 
 
 def _get_cached_pick_code(cache_key: str) -> str:
+    if _PICK_CODE_PATH_CACHE_TTL_SECONDS <= 0:
+        return ""
     normalized_key = str(cache_key or "").strip()
     if not normalized_key:
         return ""
@@ -460,11 +465,6 @@ def _get_cached_pick_code(cache_key: str) -> str:
         if now_ts >= expires_at:
             _pick_code_path_cache.pop(normalized_key, None)
             return ""
-        ttl_seconds = max(
-            60,
-            min(24 * 60 * 60, int((payload or {}).get("ttl_seconds", _PICK_CODE_PATH_CACHE_TTL_SECONDS) or _PICK_CODE_PATH_CACHE_TTL_SECONDS)),
-        )
-        payload["expires_at"] = now_ts + ttl_seconds
         payload["updated_at"] = now_ts
         return _normalize_pick_code((payload or {}).get("pick_code", ""))
 
@@ -474,7 +474,10 @@ def _set_cached_pick_code(cache_key: str, pick_code: str, ttl_seconds: int = _PI
     normalized_pick_code = _normalize_pick_code(pick_code)
     if (not normalized_key) or (not normalized_pick_code):
         return
-    normalized_ttl = max(60, min(24 * 60 * 60, int(ttl_seconds or _PICK_CODE_PATH_CACHE_TTL_SECONDS)))
+    requested_ttl = int(ttl_seconds or _PICK_CODE_PATH_CACHE_TTL_SECONDS or 0)
+    if requested_ttl <= 0:
+        return
+    normalized_ttl = max(60, min(24 * 60 * 60, requested_ttl))
     now_ts = time.time()
     with _pick_code_path_cache_lock:
         _pick_code_path_cache[normalized_key] = {
@@ -624,15 +627,17 @@ def _find_115_file_entry_by_name(cookie: str, parent_cid: str, file_name: str) -
         "User-Agent": _DEFAULT_115_USER_AGENT,
     }
 
-    # 优先尝试已存在的缓存接口（首屏 300 条）；未命中再继续翻页查找。
+    # 按 path 播放时优先拿最新首屏，避免同名替换后继续解析到旧 pickcode。
+    first_page_loaded = False
     try:
-        first_page = list_115_entries(cookie, normalized_cid)
+        first_page = list_115_entries(cookie, normalized_cid, force_refresh=True)
+        first_page_loaded = True
     except Exception:
         first_page = []
     for entry in first_page:
         if (not bool(entry.get("is_dir"))) and str(entry.get("name", "")).strip() == target_name:
             return dict(entry)
-    offset = max(len(first_page), page_size)
+    offset = max(len(first_page), page_size) if first_page_loaded else 0
 
     pages_scanned = 0
     while pages_scanned < max_pages:
@@ -674,14 +679,16 @@ def _find_115_folder_entry_by_name(cookie: str, parent_cid: str, folder_name: st
         "User-Agent": _DEFAULT_115_USER_AGENT,
     }
 
+    first_page_loaded = False
     try:
         first_page = list_115_entries(cookie, normalized_cid)
+        first_page_loaded = True
     except Exception:
         first_page = []
     for entry in first_page:
         if bool(entry.get("is_dir")) and str(entry.get("name", "")).strip() == target_name:
             return dict(entry)
-    offset = max(len(first_page), page_size)
+    offset = max(len(first_page), page_size) if first_page_loaded else 0
 
     pages_scanned = 0
     while pages_scanned < max_pages:

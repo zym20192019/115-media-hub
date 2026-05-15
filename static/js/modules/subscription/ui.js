@@ -1971,7 +1971,7 @@
                 const provider = normalizeSubscriptionProvider(task.provider || '115', '115');
                 const providerBadgeHtml = buildSubscriptionProviderBadge(provider);
                 const strictBadgeHtml = task?.strict_title_match
-                    ? '<span class="text-[10px] px-2 py-0.5 rounded-full border border-emerald-400/35 bg-emerald-500/10 text-emerald-200 font-bold">精准</span>'
+                    ? '<span class="subscription-strict-match-badge">精准</span>'
                     : '';
                 const running = subscriptionState.running && subscriptionState.current_task === taskName;
                 const queued = (subscriptionState.queued || []).includes(taskName);

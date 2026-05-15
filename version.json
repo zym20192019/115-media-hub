@@ -1,10 +1,10 @@
 {
-  "version": "0.3.27",
-  "buildDate": "2026-05-14T00:00:00+08:00",
+  "version": "0.3.28",
+  "buildDate": "2026-05-15T00:00:00+08:00",
   "notes": [
-    "更新版本号到 0.3.27",
-    "订阅任务新增“精准匹配”开关，开启后只将片名、分享目录、文件路径或 TMDB ID 作为同剧证据",
-    "精准模式会拦截正文或简介命中但片名、TMDB ID 不一致的候选，并在文件级选择阶段过滤冲突 TMDB 文件"
+    "更新版本号到 0.3.28",
+    "STRM 生成链接改为只写入服务地址与远端文件路径，不再携带 pickcode",
+    "按路径播放时默认刷新当前文件解析，避免同名替换后继续使用旧 pickcode"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

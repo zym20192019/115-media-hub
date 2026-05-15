@@ -6278,9 +6278,6 @@ def parse_int(value: Any, default: int = 0) -> int:
 def build_strm_play_url(cfg: Dict[str, Any], remote_path: str, pick_code: str = "") -> str:
     normalized_remote_path = normalize_remote_path(remote_path)
     query_payload: Dict[str, str] = {"path": normalized_remote_path}
-    normalized_pick_code = normalize_115_pick_code(pick_code)
-    if normalized_pick_code:
-        query_payload["pickcode"] = normalized_pick_code
     query = urllib.parse.urlencode(query_payload)
     proxy_base_url = str(cfg.get("strm_proxy_base_url", "")).strip().rstrip("/")
     if proxy_base_url:

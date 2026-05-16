@@ -1,8 +1,9 @@
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List
 
-class CloudProvider:
+class CloudProvider(ABC):
     # === 元数据（子类覆盖） ===
     name: str = ""
     label: str = ""
@@ -30,39 +31,51 @@ class CloudProvider:
             object.__setattr__(self, '_rate_limit_lock', threading.Lock())
 
     # === 核心 API ===
+    @abstractmethod
     def list_entries_payload(self, cookie: str, cid: str = "0", folders_only: bool = False) -> Dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
     def list_entries(self, cookie: str, cid: str = "0") -> List[Dict[str, Any]]:
         raise NotImplementedError
 
+    @abstractmethod
     def create_folder(self, cookie: str, cid: str = "0", folder_name: str = "") -> Dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
     def resolve_folder_id_by_path(self, cookie: str, relative_path: str) -> str:
         raise NotImplementedError
 
+    @abstractmethod
     def ensure_folder_id_by_path(self, cookie: str, relative_path: str) -> str:
         raise NotImplementedError
 
+    @abstractmethod
     def resolve_share_payload(self, cookie: str, share_url: str, raw_text: str = "", receive_code: str = "") -> Dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
     def list_share_entries(self, cookie: str, share_payload: Dict[str, Any], cid: str = "0", offset: int = 0, limit: int = 200) -> Dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
     def prepare_share_receive(self, cookie: str, share_payload: Dict[str, Any], cid: str = "0") -> Dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
     def submit_share_receive(self, cookie: str, receive_payload: Dict[str, Any], files: List[Dict[str, Any]]) -> Dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
     def submit_offline_task(self, cookie: str, resource_url: str, folder_id: str = "0") -> Dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
     def probe_connectivity(self, cookie: str) -> bool:
         raise NotImplementedError
 
+    @abstractmethod
     def resolve_download_url(self, cookie: str, file_id: str) -> str:
         raise NotImplementedError
 

@@ -153,6 +153,12 @@ async def test_notify_push(request: Request) -> JSONResponse:
     return JSONResponse(content=result)
 
 
+@router.get("/api/providers")
+async def get_providers(request: Request) -> JSONResponse:
+    cfg = get_config()
+    return JSONResponse(get_all_capabilities(cfg))
+
+
 @router.get("/settings/115/sign/status")
 async def get_sign115_status(request: Request) -> Dict[str, Any]:
     refresh = request.query_params.get("refresh") == "1"

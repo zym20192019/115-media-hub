@@ -786,6 +786,7 @@ def default_config() -> Dict[str, Any]:
         "api_115_download_url_cache_ttl_seconds": API_115_DOWNLOAD_URL_CACHE_TTL_SECONDS,
         "cookie_115": "",
         "cookie_quark": "",
+        "provider_enabled": {"115": True, "quark": True},
         "sign115_enabled": False,
         "sign115_cron_time": "09:00",
         "tg_proxy_enabled": False,
@@ -890,6 +891,20 @@ def normalize_subscription_quality_priority(value: Any) -> str:
     if normalized not in SUBSCRIPTION_QUALITY_PRIORITY_ORDERS:
         return SUBSCRIPTION_QUALITY_PRIORITY_DEFAULT
     return normalized
+
+
+def normalize_provider_enabled_config(cfg: Dict[str, Any]) -> Dict[str, bool]:
+    enabled = cfg.get("provider_enabled")
+    if not isinstance(enabled, dict):
+        enabled = {}
+    defaults = {"115": True, "quark": True}
+    result = {}
+    for name in defaults:
+        result[name] = bool(enabled.get(name, defaults[name]))
+    for name in enabled:
+        if name not in result:
+            result[name] = bool(enabled[name])
+    return result
 
 
 def normalize_subscription_provider(value: Any, fallback: str = "115") -> str:
@@ -2020,6 +2035,8 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         merged["cookie_115"] = ""
     if "cookie_quark" not in merged:
         merged["cookie_quark"] = ""
+    if "provider_enabled" not in merged:
+        merged["provider_enabled"] = {"115": True, "quark": True}
     if "sign115_enabled" not in merged:
         merged["sign115_enabled"] = False
     if "sign115_cron_time" not in merged:

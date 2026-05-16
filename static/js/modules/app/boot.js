@@ -110,6 +110,9 @@
                     console.warn('Failed to load provider list, using defaults', e);
                     window.providerMeta = [];
                 }
+                if (typeof renderProviderFilterButtons === 'function') {
+                    renderProviderFilterButtons();
+                }
                 const sensitiveMeta = normalizeSensitiveConfigMeta(cfg.sensitive_configured || {});
                 if (typeof setAppMountPoints === 'function') {
                     setAppMountPoints(cfg.mount_points || []);

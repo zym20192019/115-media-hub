@@ -185,6 +185,21 @@
             return getProviderMeta().find(p => p.link_type === normalized);
         }
 
+        function renderProviderFilterButtons() {
+            const container = document.getElementById('resource-provider-filters');
+            if (!container) return;
+            container.querySelectorAll('.provider-filter-dynamic').forEach(el => el.remove());
+            const enabled = getEnabledProviders();
+            enabled.forEach(p => {
+                const btn = document.createElement('button');
+                btn.id = 'resource-provider-filter-' + p.name;
+                btn.className = 'provider-filter-dynamic';
+                btn.onclick = function() { if (typeof setResourceProviderFilter === 'function') setResourceProviderFilter(p.name); };
+                btn.textContent = p.label;
+                container.appendChild(btn);
+            });
+        }
+
         function normalizeResourceFavoriteDirsPayload(value = {}) {
             const source = value && typeof value === 'object' ? value : {};
             const normalizeItems = (items = []) => {
@@ -300,14 +315,12 @@
             return '全部';
         }
 
-        function resourceItemMatchesProviderFilter(item, providerFilter = resourceProviderFilter) {
-            const normalized = normalizeResourceProviderFilter(providerFilter);
-            if (normalized === 'all') return true;
-            const linkType = getEffectiveResourceLinkType(item);
-            if (normalized === '115') return linkType === '115share';
-            if (normalized === 'magnet') return linkType === 'magnet';
-            if (normalized === 'quark') return linkType === 'quark';
-            return true;
+        function resourceItemMatchesProviderFilter(item, filter) {
+            if (filter === 'all') return true;
+            if (filter === 'magnet') return detectResourceLinkTypeByUrl(item.link_url) === 'magnet';
+            const p = getProviderByName(filter);
+            if (p) return detectResourceLinkTypeByUrl(item.link_url) === p.link_type;
+            return false;
         }
 
         function getResourceFolderApiPrefix(provider) {
@@ -3065,6 +3078,8 @@
             renderResourceImportSummary,
             renderResourceImportStepper,
             renderResourceImportBehaviorHint,
+            renderProviderFilterButtons,
+            resourceItemMatchesProviderFilter,
             toggleResourceSection,
             loadMoreResourceChannelItems,
             findResourceItem,

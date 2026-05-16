@@ -23,12 +23,8 @@ class CloudProvider(ABC):
 
     # === 限流 ===
     rate_limit_seconds: float = 0.0
-    _rate_limit_lock: threading.Lock = None
+    _rate_limit_lock: threading.Lock = threading.Lock()
     _last_request_monotonic: float = 0.0
-
-    def __init__(self):
-        if self._rate_limit_lock is None:
-            object.__setattr__(self, '_rate_limit_lock', threading.Lock())
 
     # === 核心 API ===
     @abstractmethod
@@ -91,6 +87,8 @@ class CloudProvider(ABC):
 
     def get_cookie(self, cfg: Dict[str, Any]) -> str:
         """从配置字典中获取认证凭据"""
+        if not self.name:
+            return ""
         candidates = self.config_keys if self.config_keys else [f"cookie_{self.name}"]
         for key in candidates:
             value = str(cfg.get(key, "")).strip()

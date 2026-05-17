@@ -551,17 +551,19 @@ export function generateWebhookSecret({ showToast } = {}) {
     }
 }
 
-function renderProviderAuthBlocks(cfg, sensitiveMeta) {
+export function renderProviderAuthBlocks(cfg, sensitiveMeta) {
     const container = document.getElementById('settings-provider-auth-container');
     if (!container) return;
     const meta = window.providerMeta || [];
     if (!meta.length) return;
 
+    const sm = sensitiveMeta && typeof sensitiveMeta === 'object' ? sensitiveMeta : {};
+
     container.innerHTML = meta.map(p => {
         const enabled = p.enabled;
         const cookieKey = p.config_keys[0] || 'cookie_' + p.name;
-        const cookieVal = cfg[cookieKey] || '';
-        const hasCookie = cookieVal.length > 0;
+        const isConfigured = !!sm[cookieKey];
+        const placeholder = p.auth_type === 'refresh_token' ? '粘贴 refresh_token' : '粘贴 ' + p.label + ' Cookie';
 
         let authHint = '';
         if (p.auth_type === 'refresh_token') {
@@ -578,10 +580,15 @@ function renderProviderAuthBlocks(cfg, sensitiveMeta) {
         if (p.supports_strm) tags.push('STRM');
         const tagsHtml = tags.length ? '<span class="text-xs text-slate-500 ml-2">' + tags.join(' · ') + '</span>' : '';
 
+        const statusDot = isConfigured
+            ? '<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block ml-1" title="已配置"></span>'
+            : '<span class="w-2 h-2 rounded-full bg-slate-600 inline-block ml-1" title="未配置"></span>';
+
         return '<div class="provider-auth-block mb-3 bg-slate-800/50 rounded-xl border border-slate-700/50 overflow-hidden">' +
             '<div class="flex items-center justify-between p-3 cursor-pointer" onclick="toggleProviderBlock(\'' + p.name + '\')">' +
                 '<div class="flex items-center gap-3">' +
                     '<span class="text-sm text-slate-200">' + p.label + '</span>' +
+                    statusDot +
                     tagsHtml +
                 '</div>' +
                 '<label class="relative inline-flex items-center cursor-pointer" onclick="event.stopPropagation()">' +
@@ -591,7 +598,7 @@ function renderProviderAuthBlocks(cfg, sensitiveMeta) {
             '</div>' +
             '<div id="provider-block-body-' + p.name + '" class="p-3 pt-0 border-t border-slate-700/50' + (enabled ? '' : ' hidden') + '">' +
                 authHint +
-                '<textarea id="' + cookieKey + '" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-2 font-mono" rows="3" placeholder="' + (p.auth_type === 'refresh_token' ? '粘贴 refresh_token' : '粘贴 ' + p.label + ' Cookie') + '">' + cookieVal + '</textarea>' +
+                '<textarea id="' + cookieKey + '" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-2 font-mono" rows="3" placeholder="' + placeholder + '"></textarea>' +
                 '<div class="mt-2 flex items-center gap-2">' +
                     '<button type="button" onclick="testProviderCookie(\'' + p.name + '\')" class="text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded-lg transition-colors">测试连接</button>' +
                     '<span id="provider-health-' + p.name + '" class="text-xs text-slate-500"></span>' +
@@ -685,4 +692,79 @@ export async function saveSettings({
         showToast(`保存失败：${data?.msg || '请稍后重试'}`, { tone: 'error', duration: 3200, placement: 'top-center' });
     }
     return false;
+}
+
+function getCookieHealthDotColor(state) {
+    if (state === 'valid') return '#10b981';
+    if (state === 'invalid' || state === 'error') return '#ef4444';
+    if (state === 'checking') return '#0ea5e9';
+    if (state === 'missing') return '#f59e0b';
+    return '#64748b';
+}
+
+export function renderCookieHealthBar(cookieHealthState) {
+    const container = document.getElementById('settings-provider-auth-container');
+    if (!container) return;
+    let bar = document.getElementById('cookie-health-bar');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'cookie-health-bar';
+        bar.className = 'flex items-center justify-between px-4 py-3 bg-slate-800/50 rounded-xl border border-slate-700/50 mb-3';
+        bar.innerHTML = '<div id="cookie-health-dots" class="flex items-center gap-4 flex-wrap"></div>' +
+            '<button id="cookie-health-check-all-btn" class="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition-colors" onclick="window.checkAllCookiesHealth &amp;&amp; window.checkAllCookiesHealth()">全部检测</button>';
+        container.insertBefore(bar, container.firstChild);
+    }
+    updateCookieHealthBar(cookieHealthState);
+}
+
+export function updateCookieHealthBar(cookieHealthState) {
+    const dotsContainer = document.getElementById('cookie-health-dots');
+    const checkBtn = document.getElementById('cookie-health-check-all-btn');
+    if (!dotsContainer) return;
+    const state = cookieHealthState && typeof cookieHealthState === 'object' ? cookieHealthState : {};
+    const meta = window.providerMeta || [];
+    let busy = false;
+    dotsContainer.innerHTML = meta.map(p => {
+        const entry = state[p.name] || {};
+        const dotState = entry.state || (entry.configured ? 'unknown' : 'missing');
+        const color = getCookieHealthDotColor(dotState);
+        if (dotState === 'checking') busy = true;
+        const opacity = dotState === 'missing' ? ' opacity-60' : '';
+        return '<span class="inline-flex items-center gap-1.5' + opacity + '">' +
+            '<span class="w-2 h-2 rounded-full inline-block" style="background:' + color + ';' + (dotState === 'checking' ? 'animation:cookie-dot-pulse 1s ease-in-out infinite' : '') + '"></span>' +
+            '<span class="text-xs text-slate-300">' + (p.label || p.name) + '</span>' +
+            '</span>';
+    }).join('');
+    if (checkBtn) {
+        checkBtn.disabled = busy;
+        checkBtn.classList.toggle('opacity-50', busy);
+        checkBtn.classList.toggle('pointer-events-none', busy);
+        checkBtn.innerText = busy ? '检测中…' : '全部检测';
+    }
+}
+
+// Register functions to global scope for boot.js
+if (typeof window !== 'undefined') {
+    window.renderProviderAuthBlocks = renderProviderAuthBlocks;
+    window.toggleProviderBlock = toggleProviderBlock;
+    window.toggleProviderEnabled = toggleProviderEnabled;
+    window.testProviderCookie = testProviderCookie;
+    window.renderCookieHealthBar = renderCookieHealthBar;
+    window.updateCookieHealthBar = updateCookieHealthBar;
+    window.checkAllCookiesHealth = async function() {
+        const meta = window.providerMeta || [];
+        const providers = meta.filter(p => p.enabled !== false).map(p => p.name);
+        if (!providers.length) return;
+        try {
+            const data = await window.MediaHubApi.postJson('/settings/cookies/check', {
+                providers: providers,
+                force: true
+            });
+            if (data?.cookie_health && typeof updateCookieHealthBar === 'function') {
+                updateCookieHealthBar(data.cookie_health);
+            }
+        } catch (e) {
+            console.warn('checkAllCookiesHealth failed', e);
+        }
+    };
 }

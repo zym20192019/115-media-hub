@@ -132,19 +132,34 @@
             return getResourceSourcesForSelect().filter(source => source.enabled !== false && getResourceSourceChannelId(source));
         }
 
+        function getProviderMeta() {
+            return window.providerMeta || [];
+        }
+
+        function getEnabledProviders() {
+            return getProviderMeta().filter(p => p.enabled);
+        }
+
+        function getProviderByName(name) {
+            return getProviderMeta().find(p => p.name === name);
+        }
+
+        function getProviderByLinkType(linkType) {
+            const normalized = String(linkType || '').trim().toLowerCase();
+            return getProviderMeta().find(p => p.link_type === normalized) || null;
+        }
+
         function getResourceLinkTypeLabel(linkType) {
             const normalized = String(linkType || 'unknown').trim().toLowerCase();
+            const p = getProviderByLinkType(normalized);
+            if (p) return p.label;
             const map = {
                 magnet: 'Magnet',
                 '115share': '115 分享',
                 ed2k: 'ED2K',
-                quark: '夸克网盘',
-                aliyun: '阿里云盘',
                 baidu: '百度网盘',
                 xunlei: '迅雷网盘',
                 uc: 'UC 网盘',
-                '123pan': '123 网盘',
-                tianyi: '天翼云盘',
                 pikpak: 'PikPak',
                 lanzou: '蓝奏云',
                 google_drive: 'Google Drive',
@@ -157,13 +172,13 @@
         }
 
         function getResourceProviderByLinkType(linkType) {
-            const normalized = String(linkType || '').trim().toLowerCase();
-            if (normalized === 'quark') return 'quark';
-            return '115';
+            const p = getProviderByLinkType(linkType);
+            return p ? p.name : '115';
         }
 
         function getResourceProviderLabel(provider) {
-            return normalizeSubscriptionProvider(provider, '115') === 'quark' ? '夸克' : '115';
+            const p = getProviderByName(normalizeSubscriptionProvider(provider, '115'));
+            return p ? p.label : '115';
         }
 
         function normalizeResourceFavoriteDirsPayload(value = {}) {
@@ -285,10 +300,10 @@
             const normalized = normalizeResourceProviderFilter(providerFilter);
             if (normalized === 'all') return true;
             const linkType = getEffectiveResourceLinkType(item);
-            if (normalized === '115') return linkType === '115share';
             if (normalized === 'magnet') return linkType === 'magnet';
-            if (normalized === 'quark') return linkType === 'quark';
-            return true;
+            const p = getProviderByName(normalized);
+            if (p) return linkType === p.link_type;
+            return false;
         }
 
         function getResourceFolderApiPrefix(provider) {
@@ -296,8 +311,8 @@
         }
 
         function getResourceShareApiPrefix(linkType) {
-            const normalized = String(linkType || '').trim().toLowerCase();
-            if (normalized === 'quark') return '/resource/quark';
+            const p = getProviderByLinkType(linkType);
+            if (p) return '/resource/browse/share?provider=' + encodeURIComponent(p.name);
             return '/resource/115';
         }
 
@@ -336,7 +351,12 @@
             }
 
             const state = normalizeCookieHealthState(resourceState?.cookie_health || cookieHealthState || {});
-            const providerMeta = ['115', 'quark'].map((provider) => ({
+            const wm = window.providerMeta || [];
+            const providerMeta = wm.length ? wm.map((p) => ({
+                provider: p.name,
+                label: p.label || p.name,
+                entry: normalizeCookieHealthEntry(state?.[p.name], p.name)
+            })) : ['115', 'quark'].map((provider) => ({
                 provider,
                 label: provider === 'quark' ? 'Quark' : '115',
                 entry: normalizeCookieHealthEntry(state?.[provider], provider)
@@ -350,7 +370,8 @@
             let message = '';
             let tone = 'warn';
             if (!configuredAny) {
-                message = '尚未配置可用网盘 Cookie。请在“参数配置”填写 115 或 Quark Cookie，保存后可点击“立即检测 Cookie”。';
+                const labels = wm.length ? wm.map(p => p.label).join('、') : '115 或 Quark';
+                message = `尚未配置可用网盘 Cookie。请在”参数配置”填写 ${labels} Cookie，保存后可点击”立即检测 Cookie”。`;
             } else if (riskyProviders.length) {
                 const hasInvalid = riskyProviders.some((item) => item.entry.state === 'invalid');
                 tone = hasInvalid ? 'error' : 'warn';
@@ -3029,6 +3050,21 @@
             showToast('已粘贴剪贴板内容，可直接搜索', { tone: 'info', duration: 2200, placement: 'top-center' });
         }
 
+        function renderProviderFilterButtons() {
+            const container = document.getElementById('resource-provider-filters');
+            if (!container) return;
+            container.querySelectorAll('.provider-filter-dynamic').forEach(el => el.remove());
+            const enabled = getEnabledProviders();
+            enabled.forEach(p => {
+                const btn = document.createElement('button');
+                btn.id = 'resource-provider-filter-' + p.name;
+                btn.className = 'provider-filter-dynamic';
+                btn.onclick = () => setResourceProviderFilter(p.name);
+                btn.textContent = p.label;
+                container.appendChild(btn);
+            });
+        }
+
         Object.assign(window, {
             applyResourceState,
             renderResourceBoard,
@@ -3050,6 +3086,7 @@
             renderResourceImportSummary,
             renderResourceImportStepper,
             renderResourceImportBehaviorHint,
+            renderProviderFilterButtons,
             toggleResourceSection,
             loadMoreResourceChannelItems,
             findResourceItem,

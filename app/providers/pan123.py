@@ -1,5 +1,7 @@
 import logging
 import re
+import threading
+import time
 
 import requests
 
@@ -12,7 +14,7 @@ class Pan123Provider(CloudProvider):
     label = "123云盘"
     link_type = "123pan"
     auth_type = "cookie"
-    config_keys = ["cookie_123pan"]
+    config_keys = ["123pan_username", "123pan_password"]
     supports_subscription = True
     supports_offline = True
     supports_fixed_share_link = True
@@ -21,18 +23,62 @@ class Pan123Provider(CloudProvider):
     supports_copy = True
     supports_delete = True
 
-    def _headers(self, cookie: str) -> dict:
+    def __init__(self):
+        super().__init__()
+        self._auth_token = None
+        self._auth_lock = threading.Lock()
+
+    def _ensure_token(self, cfg: dict) -> str:
+        """通过账号密码登录获取 auth token，缓存至过期"""
+        now = time.time()
+        with self._auth_lock:
+            if self._auth_token and now < self._auth_token.get("expires_at", 0) - 300:
+                return self._auth_token["token"]
+
+        username = str(cfg.get("123pan_username", "")).strip()
+        password = str(cfg.get("123pan_password", "")).strip()
+        if not username or not password:
+            raise RuntimeError("请先在参数配置中填写 123云盘 账号和密码")
+
+        resp = requests.post(
+            "https://www.123pan.com/a/api/user/sign_in",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Content-Type": "application/json",
+                "Origin": "https://www.123pan.com",
+                "Referer": "https://www.123pan.com/",
+            },
+            json={"username": username, "password": password},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        code = int(data.get("code", -1) or -1)
+        if code != 0 and code != 200:
+            raise RuntimeError(f"123云盘登录失败: {data.get('message', '未知错误')}")
+
+        token = str(data.get("data", {}).get("token", "")).strip()
+        if not token:
+            raise RuntimeError("123云盘登录失败：未获取到 token")
+
+        self._auth_token = {"token": token, "expires_at": now + 86400}
+        return token
+
+    def get_cookie(self, cfg: dict) -> str:
+        return self._ensure_token(cfg)
+
+    def _headers(self, token: str) -> dict:
         return {
-            "Cookie": cookie,
+            "Authorization": f"Bearer {token}",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
             "Referer": "https://www.123pan.com/",
             "Origin": "https://www.123pan.com",
         }
 
-    def _api_call(self, cookie: str, method: str, url: str, **kwargs) -> dict:
+    def _api_call(self, token: str, method: str, url: str, **kwargs) -> dict:
         self.throttle()
-        headers = self._headers(cookie)
+        headers = self._headers(token)
         timeout = kwargs.pop("timeout", 30)
         if method == "GET":
             resp = requests.get(url, headers=headers, timeout=timeout, **kwargs)

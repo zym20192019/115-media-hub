@@ -6,6 +6,8 @@
 
 **Architecture:** 前端改动为主，后端无需改动。`renderProviderAuthBlocks()` 输出顶部包含健康栏 HTML，通过 `updateCookieHealthBar()` 实现增量更新（SSE 推送时只更新圆点颜色，不重建整个 DOM）。状态数据通过全局 `cookieHealthState` 流转（index.js → settings.js）。
 
+**Follow-up requirement:** 状态栏按钮文案改为「健康检查」；每个 provider 名称本身可点击做单项检查；状态不只靠圆点，还要用名称背景色区分绿色有效、红色失效/异常、蓝色检查中、黄色待检测/未配置。
+
 **Tech Stack:** Vanilla JS, FastAPI SSE, Tailwind CSS
 
 ---
@@ -429,19 +431,19 @@ git commit -m "feat: wire updateCookieHealthBar into SSE and saveSettings flows"
 
 - [ ] **Step 2: 验证健康栏渲染**
 
-打开浏览器 → 设置页 → 检查「网盘认证与签到」区域顶部是否出现健康状态栏，包含所有 provider 的圆点和「全部检测」按钮。
+打开浏览器 → 设置页 → 检查「网盘认证与签到」区域顶部是否出现健康状态栏，包含所有 provider 名称按钮和「健康检查」按钮。
 
-- [ ] **Step 3: 验证全部检测功能**
+- [ ] **Step 3: 验证全部健康检查功能**
 
-点击「全部检测」→ 圆点应变蓝闪烁 → 检测完成后变绿/黄/红。按钮文字变为「检测中…」并在完成后恢复。
+点击「健康检查」→ 名称按钮应变蓝并闪烁 → 检测完成后背景变绿/黄/红。按钮文字变为「检查中…」并在完成后恢复。
 
 - [ ] **Step 4: 验证单个 provider 测试**
 
-展开一个 provider 块 → 点击「测试连接」→ 该 provider 的圆点应更新。
+点击某个 provider 名称，或展开 provider 块点击「健康检查」→ 只检查该 provider。
 
 - [ ] **Step 5: 验证 provider 禁用行为**
 
-禁用一个 provider → 点击「全部检测」→ 被禁用的 provider 不参与检测（灰点不变）。
+禁用一个 provider → 点击「健康检查」→ 被禁用的 provider 不参与检测（灰色背景不变）。
 
 - [ ] **Step 6: 验证保存设置后的状态更新**
 

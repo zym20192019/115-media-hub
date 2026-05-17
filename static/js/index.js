@@ -1144,20 +1144,23 @@
             }
         }
 
-        async function checkCookiesNow(force = true) {
+        async function checkCookiesNow(force = true, providers = null) {
             const settingsModule = await loadSettingsTabModule();
             if (settingsModule?.checkCookiesNow) {
-                await settingsModule.checkCookiesNow({
+                return await settingsModule.checkCookiesNow({
                     force,
+                    providers,
                     isBusy: cookieHealthCheckBusy,
                     setBusy: (nextValue) => {
                         cookieHealthCheckBusy = !!nextValue;
                     },
                     renderCookieHealthCards,
+                    getCookieHealthState: () => cookieHealthState,
                     applyCookieHealthState,
                     showToast,
                 });
             }
+            return false;
         }
 
         function buildLogSignature(logs, formatter) {
@@ -1704,6 +1707,74 @@
             return '';
         }
 
+        function getResourceJobId(job = {}) {
+            return Number(job?.id || 0) || 0;
+        }
+
+        function normalizeResourceJobStatus(status) {
+            return String(status || '').trim().toLowerCase();
+        }
+
+        function isResourceJobActiveStatus(status) {
+            return ['pending', 'running', 'submitted'].includes(normalizeResourceJobStatus(status));
+        }
+
+        function normalizeResourceJobListFilter(value = 'all') {
+            const normalized = String(value || 'all').trim().toLowerCase();
+            return ['all', 'active', 'submitted', 'completed', 'failed'].includes(normalized) ? normalized : 'all';
+        }
+
+        function doesResourceJobMatchFilter(job = {}, filter = 'all') {
+            const normalizedFilter = normalizeResourceJobListFilter(filter);
+            const status = normalizeResourceJobStatus(job?.status || '');
+            if (normalizedFilter === 'active') return isResourceJobActiveStatus(status);
+            if (normalizedFilter === 'submitted') return status === 'submitted';
+            if (normalizedFilter === 'completed') return status === 'completed';
+            if (normalizedFilter === 'failed') return status === 'failed';
+            return true;
+        }
+
+        function hasResourceJobSignalDiff(previousJob = {}, nextJob = {}) {
+            return ['id', 'resource_id', 'status', 'status_detail', 'updated_at', 'finished_at', 'last_triggered_at']
+                .some(key => String(previousJob?.[key] ?? '') !== String(nextJob?.[key] ?? ''));
+        }
+
+        function mergeResourceJobSignalIntoList(jobs = [], latestJob = {}, { filter = 'all', addWhenMatched = false } = {}) {
+            const sourceJobs = Array.isArray(jobs) ? jobs : [];
+            const jobId = getResourceJobId(latestJob);
+            if (!jobId) return { jobs: sourceJobs, changed: false };
+
+            const signalJob = {
+                ...latestJob,
+                id: jobId,
+                resource_id: Number(latestJob?.resource_id || 0) || 0,
+                status: normalizeResourceJobStatus(latestJob?.status || ''),
+            };
+            const matchedFilter = doesResourceJobMatchFilter(signalJob, filter);
+            let changed = false;
+            let found = false;
+            const nextJobs = [];
+            sourceJobs.forEach((job) => {
+                if (getResourceJobId(job) !== jobId) {
+                    nextJobs.push(job);
+                    return;
+                }
+                found = true;
+                if (!matchedFilter) {
+                    changed = true;
+                    return;
+                }
+                const mergedJob = { ...job, ...signalJob };
+                if (hasResourceJobSignalDiff(job, mergedJob)) changed = true;
+                nextJobs.push(mergedJob);
+            });
+            if (!found && addWhenMatched && matchedFilter) {
+                nextJobs.unshift(signalJob);
+                changed = true;
+            }
+            return { jobs: changed ? nextJobs : sourceJobs, changed };
+        }
+
         function applyResourceJobStatusToItems(items = [], resourceId = 0, status = '') {
             if (!resourceId || !status || !Array.isArray(items)) return items;
             let changed = false;
@@ -1731,22 +1802,36 @@
         function applyResourceJobSignalToResourceState(job = {}) {
             const resourceId = Number(job?.resource_id || 0) || 0;
             const status = normalizeResourceItemStatusFromJob(job?.status || '');
-            if (!resourceId || !status) return false;
+            const jobId = getResourceJobId(job);
+            if ((!resourceId || !status) && !jobId) return false;
             const currentItems = Array.isArray(resourceState.items) ? resourceState.items : [];
             const currentChannelSections = Array.isArray(resourceState.channel_sections) ? resourceState.channel_sections : [];
             const currentSearchSections = Array.isArray(resourceState.search_sections) ? resourceState.search_sections : [];
             const nextItems = applyResourceJobStatusToItems(currentItems, resourceId, status);
             const nextChannelSections = applyResourceJobStatusToSections(currentChannelSections, resourceId, status);
             const nextSearchSections = applyResourceJobStatusToSections(currentSearchSections, resourceId, status);
+            const jobPageFilter = normalizeResourceJobListFilter(resourceState?.job_pagination?.status || resourceJobFilter || 'all');
+            const nextJobsResult = mergeResourceJobSignalIntoList(resourceState.jobs || [], job, {
+                filter: jobPageFilter,
+                addWhenMatched: false,
+            });
+            const nextActiveJobsResult = mergeResourceJobSignalIntoList(resourceState.active_jobs || [], job, {
+                filter: 'active',
+                addWhenMatched: isResourceJobActiveStatus(job?.status || ''),
+            });
             const selectedChanged = selectedResourceItem && Number(selectedResourceItem?.id || 0) === resourceId;
             const changed = nextItems !== currentItems
                 || nextChannelSections !== currentChannelSections
                 || nextSearchSections !== currentSearchSections
+                || nextJobsResult.changed
+                || nextActiveJobsResult.changed
                 || selectedChanged;
             if (!changed) return false;
             resourceState = {
                 ...resourceState,
                 items: nextItems,
+                jobs: nextJobsResult.jobs,
+                active_jobs: nextActiveJobsResult.jobs,
                 channel_sections: nextChannelSections,
                 search_sections: nextSearchSections,
             };
@@ -1754,6 +1839,8 @@
                 selectedResourceItem = { ...selectedResourceItem, status };
             }
             if (currentTab === 'resource') {
+                if (typeof renderResourceJobs === 'function') renderResourceJobs();
+                if (typeof syncResourceJobModalTrigger === 'function') syncResourceJobModalTrigger();
                 renderResourceBoard();
                 renderResourceBoardHint();
             }

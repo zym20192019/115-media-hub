@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/xianer/.claude/plugins/cache/superpowers-marketplace/superpowers/5.0.7/skills/subagent-driven-development/**)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache .venv/bin/python -m compileall app/providers/base.py)",
+      "Bash(.venv/bin/python -m compileall app/providers/base.py)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider/.venv/bin/python -m compileall /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider/app/providers/registry.py)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache .venv/bin/python -m compileall app/providers/pan115.py)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache .venv/bin/python -c \"import app.providers.pan115; from app.providers.registry import list_all; print\\([p.name for p in list_all\\(\\)]\\)\")",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider/.venv/bin/python -m compileall /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider/app/providers/quark.py)",
+      "Bash(.venv/bin/python -c \"import app.providers.quark; from app.providers.registry import list_all; print\\([p.name for p in list_all\\(\\)]\\)\")",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache .venv/bin/python -c ' *)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache .venv/bin/python -m compileall app/core.py app/routes/settings.py)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache .venv/bin/python -m compileall /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider/app/core.py)",
+      "Bash(git -C /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider diff --stat)",
+      "Bash(git -C /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider status --short)",
+      "Bash(git -C /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider add templates/partials/modals/subscription.html static/js/modules/subscription/ui.js static/js/modules/subscription/folders.js static/js/modules/resource/core.js static/js/modules/scraper/core.js)",
+      "Bash(git -C /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider commit -m 'feat: dynamic subscription dropdown, capability-driven import modal, dynamic scraper list')",
+      "Bash(git -C /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider log --oneline -3)",
+      "Bash(git -C /Users/xianer/Documents/code/115-media-hub/.worktrees/multi-provider log --oneline -3 --stat)",
+      "Bash(PYTHONPYCACHEPREFIX=/tmp/115-media-hub-pycache .venv/bin/python -m compileall app/routes/resource.py)",
+      "Bash(.venv/bin/python -m compileall app/providers/tianyi.py app/providers/pan123.py app/providers/aliyun.py)",
+      "Bash(curl -s http://localhost:18080/api/providers)",
+      "Bash(python -m json.tool)",
+      "Bash(.venv/bin/python -m compileall app/core.py app/providers/tianyi.py app/providers/pan123.py app/providers/aliyun.py)",
+      "Bash(cp -r doc/superpowers/plans/* docs/superpowers/plans/)",
+      "Bash(cp -r doc/superpowers/specs/* docs/superpowers/specs/)"
+    ]
+  }
+}

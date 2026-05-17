@@ -122,10 +122,27 @@ async def start_subscription_task_with_link(request: Request) -> Dict[str, Any]:
     if not task:
         return JSONResponse(status_code=404, content={"ok": False, "msg": "任务不存在"})
     provider = normalize_subscription_provider(task.get("provider", "115"), fallback="115")
+    from app.providers.registry import get_or_none as _registry_get_provider_or_none
+
+    provider_meta = _registry_get_provider_or_none(provider)
+    if not provider_meta or not provider_meta.supports_subscription or not provider_meta.link_type:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "当前订阅任务不支持扫描链接"})
     source_text = link_url or raw_text
+    candidate_links = []
+    if link_url:
+        candidate_links.append(link_url)
+    candidate_links.extend(extract_resource_links(source_text))
+    normalized_link = ""
+    for candidate_link in candidate_links:
+        candidate = str(candidate_link or "").strip()
+        if not candidate:
+            continue
+        if resolve_resource_link_type("", candidate) == provider_meta.link_type:
+            normalized_link = candidate
+            break
     if provider == "quark":
         link_match = RESOURCE_QUARK_SHARE_URL_REGEX.search(source_text)
-        normalized_link = str(link_match.group(0) if link_match else link_url).strip()
+        normalized_link = str(link_match.group(0) if link_match else normalized_link).strip()
         if normalized_link and not normalized_link.lower().startswith(("http://", "https://")):
             normalized_link = f"https://{normalized_link.lstrip('/')}"
         if resolve_resource_link_type("", normalized_link) != "quark":
@@ -138,14 +155,17 @@ async def start_subscription_task_with_link(request: Request) -> Dict[str, Any]:
         payload_receive_code = normalize_receive_code(payload.get("receive_code", ""))
     elif provider == "115":
         link_match = RESOURCE_115_SHARE_URL_REGEX.search(source_text)
-        normalized_link = str(link_match.group(0) if link_match else link_url).strip()
+        normalized_link = str(link_match.group(0) if link_match else normalized_link).strip()
         payload = parse_115_share_payload(normalized_link, raw_text, receive_code)
         if not str(payload.get("share_code", "") or "").strip():
             return JSONResponse(status_code=400, content={"ok": False, "msg": "请填写 115 分享链接"})
         payload_link = str(payload.get("url", "") or normalized_link).strip()
         payload_receive_code = normalize_receive_code(payload.get("receive_code", ""))
     else:
-        return JSONResponse(status_code=400, content={"ok": False, "msg": "当前订阅任务不支持扫描链接"})
+        if not normalized_link or resolve_resource_link_type("", normalized_link) != provider_meta.link_type:
+            return JSONResponse(status_code=400, content={"ok": False, "msg": f"请填写 {provider_meta.label} 分享链接"})
+        payload_link = normalized_link
+        payload_receive_code = receive_code
 
     status = queue_subscription_job(
         task_name,

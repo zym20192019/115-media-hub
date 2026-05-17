@@ -831,13 +831,20 @@ def find_subscription_task_match_candidate(task: Dict[str, Any], last_episode: i
     conn.close()
 
     provider = normalize_subscription_provider(task.get("provider", "115"), fallback="115")
+    try:
+        from ..providers.registry import get_or_none as _registry_get_provider_or_none
+
+        provider_meta = _registry_get_provider_or_none(provider)
+    except Exception:
+        provider_meta = None
     min_score = (
         int(SUBSCRIPTION_QUARK_MIN_SCORE)
         if provider == "quark"
         else max(30, min(100, int(task.get("min_score", SUBSCRIPTION_MIN_SCORE) or SUBSCRIPTION_MIN_SCORE)))
     )
     media_type = str(task.get("media_type", "movie") or "movie").strip().lower()
-    supported_link_types = {"quark"} if provider == "quark" else {"115share"}
+    provider_link_type = str(getattr(provider_meta, "link_type", "") or "").strip()
+    supported_link_types = {provider_link_type} if provider_link_type else ({"quark"} if provider == "quark" else {"115share"})
     candidates: List[Dict[str, Any]] = []
     for row in rows:
         item = serialize_resource_item_row(row)

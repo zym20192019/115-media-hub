@@ -83,23 +83,25 @@
             const currentLinkType = getEffectiveResourceLinkType(item);
             const currentProvider = getResourceProviderByLinkType(currentLinkType);
             const currentProviderLabel = getResourceProviderLabel(currentProvider);
+            const currentProviderMeta = (window.providerMeta || []).find(m => m.name === currentProvider);
+            const providerSupportsMonitor = currentLinkType === 'magnet' || !!currentProviderMeta?.supports_monitor;
             if (!canOpenResourceImport(item)) {
-                hints.push('当前资源没有可直接导入的 magnet / 115 / quark 分享链接。');
+                hints.push('当前资源没有可直接导入的 magnet 或已启用网盘分享链接。');
             } else {
                 if (batchMode) {
                     hints.push(`已识别 ${batchCount} 条磁力链接，将按同一保存目录和延时设置依次导入。`);
                 }
                 if (!isLinkTypeCookieConfigured(currentLinkType)) {
-                    hints.push(`还没有配置${currentProviderLabel} Cookie。你可以先查看并填写保存资源和保存目录，但真正提交前需要先补上 Cookie。`);
+                    hints.push(`还没有配置${currentProviderLabel}认证信息。你可以先查看并填写保存资源和保存目录，但真正提交前需要先补上认证信息。`);
                 }
-                if (currentProvider === 'quark') {
-                    hints.push('夸克链路不会联动监控任务，也不会自动触发 strm 刷新。');
+                if (!providerSupportsMonitor) {
+                    hints.push(`${currentProviderLabel} 链路不会联动文件夹监控，也不会自动触发 strm 刷新。`);
                 } else {
                     const taskCount = Array.isArray(resourceState.monitor_tasks) && resourceState.monitor_tasks.length
                         ? resourceState.monitor_tasks.length
                         : ((monitorState.tasks || []).length || 0);
                     if (!taskCount) {
-                        hints.push('当前还没有配置文件夹监控任务。保存到 115 仍然可用，但不会自动生成 strm。');
+                        hints.push(`当前还没有配置文件夹监控任务。保存到 ${currentProviderLabel} 仍然可用，但不会自动生成 strm。`);
                     }
                 }
             }
@@ -206,7 +208,7 @@
         function shouldConfirmDuplicateShareJob(error) {
             if (Number(error?.status || 0) !== 409) return false;
             const linkType = String(error?.payload?.link_type || resourceModalLinkType || '').trim().toLowerCase();
-            if (!['115share', 'quark'].includes(linkType)) return false;
+            if (!isResourceShareLinkType(linkType)) return false;
             return Boolean(error?.payload?.duplicate_confirm_required ?? true);
         }
 
@@ -287,6 +289,7 @@
             try {
                 const batchMode = isResourceBatchImportMode();
                 const batchItems = batchMode ? getResourceBatchMagnetItems() : [];
+                const currentLinkType = getEffectiveResourceLinkType(selectedResourceItem);
                 const currentProvider = getCurrentResourceProvider();
                 const currentProviderLabel = getResourceProviderLabel(currentProvider);
                 const selectionState = getResourceShareSelectionState();
@@ -410,7 +413,7 @@
                 const payload = {
                     savepath,
                     refresh_delay_seconds: refreshDelaySeconds,
-                    auto_refresh: currentProvider !== 'quark'
+                    auto_refresh: currentLinkType === 'magnet' || !!((window.providerMeta || []).find(m => m.name === currentProvider)?.supports_monitor)
                 };
                 if (folderId && folderId !== '0') payload.folder_id = folderId;
                 if (Number(selectedResourceId || 0) > 0) payload.resource_id = selectedResourceId;
@@ -436,8 +439,9 @@
                 releaseResourceSubmitLock(submitLockToken, { render: false });
                 refreshResourceJobsAfterSubmit();
                 const matchedTaskName = String(data.monitor_task_name || '').trim();
-                const tail = currentProvider === 'quark'
-                    ? '，夸克链路不联动文件夹监控'
+                const providerSupportsMonitor = currentLinkType === 'magnet' || !!((window.providerMeta || []).find(m => m.name === currentProvider)?.supports_monitor);
+                const tail = !providerSupportsMonitor
+                    ? `，${currentProviderLabel} 链路不联动文件夹监控`
                     : (
                         matchedTaskName
                             ? (data.auto_refresh ? `，保存完成后会自动触发“${matchedTaskName}”` : `，已匹配“${matchedTaskName}”，可稍后手动触发刷新`)

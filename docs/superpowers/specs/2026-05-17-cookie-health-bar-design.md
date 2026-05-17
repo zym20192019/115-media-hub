@@ -2,7 +2,7 @@
 
 ## 概述
 
-在设置页「网盘认证与签到」区域顶部新增一条紧凑的健康状态栏，一眼看到所有网盘的 cookie 健康状态，支持一键全部检测。
+在设置页「网盘认证与签到」区域顶部新增一条紧凑的健康状态栏，一眼看到所有网盘的 cookie 健康状态，支持一键全部健康检查，也支持点击单个网盘名称独立检查。
 
 ## 现状与问题
 
@@ -12,7 +12,7 @@
 
 ## 触发方式
 
-**按需检测**：打开设置页时从 `/get_settings` 获取初始状态（`cookie_health` 字段），点击「全部检测」按钮时 POST `/settings/cookies/check` 触发检测，SSE 实时推送结果更新 UI。
+**按需检测**：打开设置页时从 `/get_settings` 获取初始状态（`cookie_health` 字段），点击「健康检查」按钮或单个网盘名称时 POST `/settings/cookies/check` 触发检测，SSE 实时推送结果更新 UI。
 
 不引入后台定时轮询。
 
@@ -26,13 +26,14 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  🟢 115网盘  🟢 夸克网盘  🟡 天翼云盘  ⚫ 123云盘  ⚫ 阿里云盘  [全部检测] │
+│  [115网盘]  [夸克网盘]  [天翼云盘]  [123云盘]  [阿里云盘]  [健康检查] │
 └──────────────────────────────────────────────────────────┘
 ```
 
-- 每个网盘：圆点（颜色表状态）+ 名称
-- 最右侧：「全部检测」按钮
-- 检测中圆点闪烁蓝色，按钮显示 "检测中…" 并禁用
+- 每个网盘：圆点 + 名称胶囊按钮，背景颜色直接表达状态
+- 点击单个网盘名称：只检查该 provider
+- 最右侧：「健康检查」按钮：检查所有已启用 provider
+- 检测中圆点闪烁蓝色，按钮显示 "检查中…" 并禁用
 
 ### 状态颜色
 
@@ -47,8 +48,9 @@
 ### 交互流程
 
 1. 打开设置页 → `/get_settings` 返回 `cookie_health` 初始状态 → 渲染状态栏
-2. 点击「全部检测」→ POST `/settings/cookies/check` → 所有已启用 provider 开始检测
-3. 后端执行 `probe_connectivity()` → SSE 推送 `cookie_health` 增量 → 状态栏实时更新
+2. 点击「健康检查」→ POST `/settings/cookies/check` → 所有已启用 provider 开始检测
+3. 点击某个网盘名称 → POST `/settings/cookies/check`，只传该 provider
+4. 后端执行 `probe_connectivity()` → SSE 推送 `cookie_health` 增量 → 状态栏实时更新
 
 ## 后端改动
 
@@ -76,7 +78,7 @@ function renderCookieHealthBar(cookieHealthState) {
     const providers = window.providerMeta || [];
     // 每个 provider 渲染圆点 + 名称
     // 状态从 cookieHealthState[provider.name] 读取
-    // 「全部检测」按钮 → POST /settings/cookies/check
+    // 「健康检查」按钮和 provider 名称按钮 → POST /settings/cookies/check
 }
 ```
 
@@ -111,17 +113,21 @@ function renderCookieHealthBar(cookieHealthState) {
   → GET /get_settings → cfg.cookie_health
   → renderCookieHealthBar(cookie_health) → 渲染初始状态栏
 
-点击「全部检测」
+点击「健康检查」
   → POST /settings/cookies/check {providers: ['115','quark','tianyi','123pan','aliyun']}
   → refresh_cookie_health_status() 逐个调 probe_connectivity()
   → 每个 provider 检测完成 → schedule_ui_state_push(0)
   → SSE push {cookie_health: {...}}
-  → applyCookieHealthState() → renderCookieHealthBar() 更新圆点
+  → applyCookieHealthState() → renderCookieHealthBar() 更新状态背景
+
+点击单个网盘名称
+  → POST /settings/cookies/check {providers: ['quark']}
+  → 同一条 cookie_health 状态流更新
 ```
 
 ## 边界情况
 
-- **provider 被禁用**：显示灰色圆点，不参与「全部检测」
+- **provider 被禁用**：显示灰色背景，不参与「健康检查」
 - **provider 无 cookie**：状态为 `missing`，黄色圆点
 - **检测超时/网络错误**：状态为 `error`，红色圆点
 - **providerMeta 为空**：不渲染状态栏
@@ -132,5 +138,5 @@ function renderCookieHealthBar(cookieHealthState) {
 - 不新增后端路由
 - 不引入定时轮询
 - 不在状态栏显示检测时间戳（保持简洁）
-- 每个 provider 块内已有的「测试连接」按钮保持不变
+- 每个 provider 块内按钮改名「健康检查」；未填写新认证时检查已保存认证，填写新认证时只验证当前输入
 - 新 provider（aliyun、tianyi、pan123）的运行时健康标记（操作成功/失败时自动标记）延后处理

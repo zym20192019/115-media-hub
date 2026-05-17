@@ -152,7 +152,8 @@
             const enabledText = task?.enabled === false ? '已停用' : '已启用';
             const mediaText = isTv ? '电视剧' : '电影';
             const provider = normalizeSubscriptionProvider(task?.provider || '115', '115');
-            const providerText = provider === 'quark' ? '夸克' : '115';
+            const _pMeta = (window.providerMeta || []).find(m => m.name === provider);
+            const providerText = _pMeta ? _pMeta.label : (provider === 'quark' ? '夸克' : '115');
             const titleText = String(task?.title || task?.name || '').trim() || '未命名影视';
             const savepath = String(task?.savepath || '').trim() || '--';
             const fixedShareLink = String(task?.share_link_url || '').trim();
@@ -188,13 +189,13 @@
             const latestMatched = String(task?.matched_resource_title || '').trim();
             const latestText = latestMatched ? `最近命中：${latestMatched}` : '最近尚未命中资源';
             const modeText = isTv ? (multiSeasonMode ? '多季合一追更' : '单季追更') : '命中资源后即执行';
-            const fixedShareText = provider === '115' && fixedShareLink
+            const fixedShareText = fixedShareLink
                 ? (fixedLinkChannelSearch ? '，固定分享链接兜底' : '，固定分享链接已填写（未启用兜底）')
                 : '';
-            const shareScopeText = provider === '115' && shareSubdir
+            const shareScopeText = shareSubdir
                 ? `，分享子目录 ${shareSubdir}${shareSubdirCid ? `（CID ${shareSubdirCid}）` : ''}`
-                : (provider === '115' && shareSubdirCid ? `，分享子目录 CID ${shareSubdirCid}` : '');
-            const providerRuleText = provider === 'quark' ? '，仅频道自动匹配（不使用固定分享链接）' : '';
+                : (shareSubdirCid ? `，分享子目录 CID ${shareSubdirCid}` : '');
+            const providerRuleText = (!_pMeta?.supports_fixed_share_link) ? '，仅频道自动匹配（不使用固定分享链接）' : '';
             const excludeText = excludeKeywords.length ? `，排除 ${excludeKeywords.slice(0, 4).join('、')}` : '';
             const minFileSizeMb = normalizeSubscriptionMinFileSizeMb(task?.min_file_size_mb ?? 0);
             const sizeFilterText = minFileSizeMb > 0 ? `，小于 ${formatSubscriptionMinFileSizeMb(minFileSizeMb)}MB 不导入` : '';
@@ -557,25 +558,33 @@
 
         function normalizeSubscriptionProvider(value, fallback = '115') {
             const normalized = String(value || '').trim().toLowerCase();
-            if (normalized === '115' || normalized === 'quark') return normalized;
+            const byName = (window.providerMeta || []).find(m => m.name === normalized);
+            if (byName) return byName.name;
+            const byLinkType = (window.providerMeta || []).find(m => m.link_type === normalized);
+            if (byLinkType) return byLinkType.name;
             const fallbackNormalized = String(fallback || '115').trim().toLowerCase();
-            return fallbackNormalized === 'quark' ? 'quark' : '115';
+            const _fbP = (window.providerMeta || []).find(m => m.name === fallbackNormalized);
+            return _fbP ? _fbP.name : '115';
         }
 
         function getSubscriptionProviderLabel(provider) {
-            return normalizeSubscriptionProvider(provider, '115') === 'quark' ? 'Quark' : '115';
+            const _pMeta = (window.providerMeta || []).find(m => m.name === provider);
+            return _pMeta ? _pMeta.label : (normalizeSubscriptionProvider(provider, '115') === 'quark' ? 'Quark' : '115');
         }
 
         function getSubscriptionProviderBadgeLabel(provider) {
-            return normalizeSubscriptionProvider(provider, '115') === 'quark' ? 'Quark' : '115';
+            return getSubscriptionProviderLabel(provider);
         }
 
         function buildSubscriptionProviderBadge(provider) {
             const normalized = normalizeSubscriptionProvider(provider, '115');
             const label = getSubscriptionProviderBadgeLabel(normalized);
-            const className = normalized === 'quark'
+            const linkType = ((window.providerMeta || []).find(m => m.name === normalized) || {}).link_type || '';
+            const className = linkType === 'quark'
                 ? 'resource-card-type-badge resource-card-type-badge-quark'
-                : 'resource-card-type-badge resource-card-type-badge-115share';
+                : (linkType === '115share'
+                    ? 'resource-card-type-badge resource-card-type-badge-115share'
+                    : 'resource-card-type-badge resource-card-type-badge-default');
             return `<span class="${className}">${escapeHtml(label)}</span>`;
         }
 
@@ -587,8 +596,9 @@
             const select = document.getElementById('subscription_provider');
             if (!select) return;
             const meta = window.providerMeta || [];
-            const enabled = meta.filter(p => p.enabled);
+            const enabled = meta.filter(p => p.enabled && p.supports_subscription);
             select.innerHTML = enabled.map(p => '<option value="' + p.name + '">' + p.label + '</option>').join('');
+            if (enabled.length && !enabled.some(p => p.name === select.value)) select.value = enabled[0].name;
         }
 
         function getSubscriptionScanRecommendedDefaults(provider = '115') {
@@ -941,8 +951,10 @@
             const movieHint = /(电影|movie|film|剧场版|電影)/i.test(text);
             const animeMode = /(番剧|动漫|新番|动画|動畫|anime)/i.test(text);
             const mediaType = (hasEpisodeMeta || tvHint) && !movieHint ? 'tv' : 'movie';
+            const linkType = getEffectiveResourceLinkType(payload);
+            const _lp = (window.providerMeta || []).find(m => m.link_type === linkType);
             const provider = normalizeSubscriptionProvider(
-                getEffectiveResourceLinkType(payload) === 'quark' ? 'quark' : '115',
+                _lp ? _lp.name : (linkType === 'quark' ? 'quark' : '115'),
                 '115'
             );
 
@@ -1252,7 +1264,10 @@
 
         function syncSubscriptionProviderUI() {
             const provider = getCurrentSubscriptionProvider();
-            const isQuark = provider === 'quark';
+            const meta = window.providerMeta || [];
+            const p = meta.find(m => m.name === provider);
+            const hasFixedShare = p && p.supports_fixed_share_link;
+            const hasMinScore = p && p.supports_subscription;
             const providerLabel = getSubscriptionProviderLabel(provider);
             const savepathProviderLabelEl = document.getElementById('subscription-savepath-provider-label');
             const fixedLinkBlockEl = document.getElementById('subscription-115-fixed-link-block');
@@ -1260,20 +1275,40 @@
             const minScoreWrapEl = document.getElementById('subscription-min-score-wrap');
             const minScoreInputEl = document.getElementById('subscription_min_score');
             const strategyHintEl = document.getElementById('subscription-provider-strategy-hint');
+            const shareLinkInputEl = document.getElementById('subscription_share_link_url');
+            const fixedLinkTitleEl = document.getElementById('subscription-fixed-link-title');
+            const fixedLinkHintEl = document.getElementById('subscription-fixed-link-hint');
+            const shareSubdirLabelEl = document.getElementById('subscription-share-subdir-label');
 
             if (savepathProviderLabelEl) savepathProviderLabelEl.textContent = `${providerLabel} 保存目录`;
-            if (fixedLinkBlockEl) fixedLinkBlockEl.classList.toggle('hidden', isQuark);
-            if (quarkHintEl) quarkHintEl.classList.toggle('hidden', !isQuark);
-            if (minScoreWrapEl) minScoreWrapEl.classList.toggle('hidden', isQuark);
-            if (minScoreInputEl) minScoreInputEl.disabled = isQuark;
+            if (fixedLinkBlockEl) fixedLinkBlockEl.classList.toggle('hidden', !hasFixedShare);
+            if (quarkHintEl) quarkHintEl.classList.toggle('hidden', hasFixedShare);
+            if (minScoreWrapEl) minScoreWrapEl.classList.toggle('hidden', !hasMinScore);
+            if (minScoreInputEl) minScoreInputEl.disabled = !hasMinScore;
             if (strategyHintEl) {
-                strategyHintEl.textContent = isQuark
-                    ? '匹配策略：Quark 默认使用资源搜索自动匹配，采用独立评分（强标题命中 + 集数命中）；也可手动扫描单个分享链接。'
-                    : '匹配策略：默认先执行资源搜索（TG 频道搜索，及启用时的 PanSou 搜索）；可开启固定 115 分享链接兜底，把固定链接候选排在资源搜索候选之后。';
+                const baseHint = '匹配策略：默认先执行资源搜索（TG 频道搜索，及启用时的 PanSou 搜索）';
+                if (hasFixedShare) {
+                    strategyHintEl.textContent = baseHint + '；可开启固定分享链接兜底，把固定链接候选排在资源搜索候选之后。';
+                } else {
+                    strategyHintEl.textContent = baseHint + '，也可手动扫描单个分享链接。';
+                }
+            }
+            if (fixedLinkTitleEl) fixedLinkTitleEl.textContent = '固定分享链接（可选）';
+            if (fixedLinkHintEl) fixedLinkHintEl.textContent = `资源搜索会优先执行（TG 频道搜索，及启用时的 PanSou 搜索）；下方开关开启后，这个固定 ${providerLabel} 分享链接会作为备选候选排在资源搜索候选之后。`;
+            if (shareSubdirLabelEl) shareSubdirLabelEl.textContent = `${providerLabel} 分享子目录（可选）`;
+            if (shareLinkInputEl) {
+                const exampleMap = {
+                    '115': 'https://115.com/s/xxxxxxx?password=abcd',
+                    quark: 'https://pan.quark.cn/s/xxxxxx',
+                    aliyun: 'https://www.alipan.com/s/xxxxxx',
+                    '123pan': 'https://www.123pan.com/s/xxxxxx',
+                    tianyi: 'https://cloud.189.cn/t/xxxxxx',
+                };
+                shareLinkInputEl.placeholder = `例如：${exampleMap[provider] || 'https://example.com/s/xxxxxx'}`;
             }
             syncSubscriptionScanTuningHint(provider);
 
-            if (isQuark) {
+            if (!hasFixedShare) {
                 const shareLinkInput = document.getElementById('subscription_share_link_url');
                 const shareReceiveInput = document.getElementById('subscription_share_receive_code');
                 const fixedLinkSearchInput = document.getElementById('subscription_fixed_link_channel_search');
@@ -1347,14 +1382,16 @@
             );
             const shareLinkRaw = String(document.getElementById('subscription_share_link_url')?.value || '').trim();
             const shareLinkType = detectResourceLinkTypeByUrl(shareLinkRaw);
-            const normalizedShareLink = provider === '115' && shareLinkType === '115share' ? shareLinkRaw : '';
+            const providerMeta = (window.providerMeta || []).find(m => m.name === provider);
+            const providerLinkType = String(providerMeta?.link_type || '').trim().toLowerCase();
+            const normalizedShareLink = providerLinkType && shareLinkType === providerLinkType ? shareLinkRaw : '';
             const receiveCodeRaw = String(document.getElementById('subscription_share_receive_code')?.value || '').trim();
             const normalizedReceiveCode = normalizeReceiveCodeInput(receiveCodeRaw);
             const shareSubdir = normalizeRelativePathInput(document.getElementById('subscription_share_subdir')?.value || '');
             const shareSubdirCid = shareSubdir
                 ? normalizeShareCidInput(document.getElementById('subscription_share_subdir_cid')?.value || '')
                 : '';
-            const fixedLinkChannelSearch = provider === '115' && !!document.getElementById('subscription_fixed_link_channel_search')?.checked;
+            const fixedLinkChannelSearch = !!normalizedShareLink && !!document.getElementById('subscription_fixed_link_channel_search')?.checked;
             const excludeKeywords = parseSubscriptionExcludeKeywords(document.getElementById('subscription_exclude_keywords')?.value || '');
             const excludeInput = document.getElementById('subscription_exclude_keywords');
             if (excludeInput) excludeInput.value = excludeKeywords.join(', ');
@@ -1412,7 +1449,10 @@
             if (titleEl) titleEl.innerText = '新增订阅任务';
             document.getElementById('subscription_media_type').value = 'tv';
             const providerInput = document.getElementById('subscription_provider');
-            if (providerInput) providerInput.value = '115';
+            if (providerInput) {
+                const firstProvider = (window.providerMeta || []).find(p => p.enabled && p.supports_subscription)?.name || '115';
+                providerInput.value = firstProvider;
+            }
             document.getElementById('subscription_title').value = '';
             document.getElementById('subscription_aliases').value = '';
             const excludeInput = document.getElementById('subscription_exclude_keywords');
@@ -1444,7 +1484,7 @@
             const strictTitleInput = document.getElementById('subscription_strict_title_match');
             if (strictTitleInput) strictTitleInput.checked = false;
             document.getElementById('subscription_quality_priority').value = 'ultra';
-            setSubscriptionScanSettingsToForm(getSubscriptionScanRecommendedDefaults('115'), '115');
+            setSubscriptionScanSettingsToForm(getSubscriptionScanRecommendedDefaults(providerInput?.value || '115'), providerInput?.value || '115');
             document.getElementById('subscription_enabled').checked = true;
             clearSubscriptionTmdbBinding({ silent: true });
             subscriptionTmdbResults = [];
@@ -1506,13 +1546,19 @@
         async function saveSubscriptionTask() {
             const task = currentSubscriptionFormData();
             task.provider = normalizeSubscriptionProvider(task.provider, '115');
+            const _taskP = (window.providerMeta || []).find(m => m.name === task.provider);
+            const _hasFixedShare = _taskP && _taskP.supports_fixed_share_link;
+            const _hasOffline = _taskP && _taskP.supports_offline;
             if (!task.title) return showToast('订阅影视名称不能为空', { tone: 'warn', duration: 2600, placement: 'top-center' });
             if (!task.savepath) return showToast('请先从网盘选择保存目录', { tone: 'warn', duration: 2800, placement: 'top-center' });
             const rawShareLink = String(document.getElementById('subscription_share_link_url')?.value || '').trim();
-            if (task.provider === '115' && rawShareLink && !task.share_link_url) return showToast('固定分享链接仅支持 115 分享链接格式', { tone: 'warn', duration: 3000, placement: 'top-center' });
+            if (_hasFixedShare && rawShareLink && !task.share_link_url) {
+                const providerLabel = getSubscriptionProviderLabel(task.provider);
+                return showToast(`固定分享链接仅支持当前 ${providerLabel} 分享链接格式`, { tone: 'warn', duration: 3000, placement: 'top-center' });
+            }
             const rawReceiveCode = String(document.getElementById('subscription_share_receive_code')?.value || '').trim();
-            if (task.provider === '115' && rawReceiveCode && !task.share_link_receive_code) return showToast('提取码格式不正确，请输入 1-16 位字母或数字', { tone: 'warn', duration: 3000, placement: 'top-center' });
-            if (task.provider !== '115' || !task.share_link_url) {
+            if (_hasFixedShare && rawReceiveCode && !task.share_link_receive_code) return showToast('提取码格式不正确，请输入 1-16 位字母或数字', { tone: 'warn', duration: 3000, placement: 'top-center' });
+            if (!_hasFixedShare || !task.share_link_url) {
                 task.share_link_url = '';
                 task.share_link_receive_code = '';
                 task.share_subdir = '';
@@ -1526,8 +1572,9 @@
             if (task.enabled && (!Array.isArray(task.schedule_weekdays) || task.schedule_weekdays.length <= 0)) {
                 return showToast('请至少选择一个查询星期，或先关闭任务启用状态', { tone: 'warn', duration: 3400, placement: 'top-center' });
             }
-            if (task.provider === '115' && (task.min_score < 30 || task.min_score > 100)) return showToast('匹配阈值需在 30-100 之间', { tone: 'warn', duration: 2800, placement: 'top-center' });
-            if (task.provider !== '115') task.min_score = 55;
+            if (_hasFixedShare || _taskP?.supports_subscription) {
+                if (task.min_score < 30 || task.min_score > 100) return showToast('匹配阈值需在 30-100 之间', { tone: 'warn', duration: 2800, placement: 'top-center' });
+            }
             if (!['balanced', 'ultra', 'fhd', 'hd', 'sd'].includes(task.quality_priority)) return showToast('清晰度优先级配置无效', { tone: 'warn', duration: 2800, placement: 'top-center' });
             if (task.tmdb_id > 0 && task.tmdb_media_type && task.tmdb_media_type !== task.media_type) {
                 return showToast('TMDB 绑定类型与订阅类型不一致，请重新绑定', { tone: 'warn', duration: 3200, placement: 'top-center' });
@@ -1712,11 +1759,14 @@
             const raw = String(text || '').trim();
             if (!raw) return '';
             const normalizedProvider = normalizeSubscriptionProvider(provider, '115');
-            const pattern = normalizedProvider === '115'
-                ? /(?:https?:\/\/)?(?:115cdn|115|anxia)\.com\/s\/[A-Za-z0-9]+(?:\?[^\s<>'"#]*)?(?:#[A-Za-z0-9]{1,16})?/i
-                : /(?:https?:\/\/)?(?:pan|www)\.quark\.cn\/s\/[A-Za-z0-9]+(?:\?[^\s<>'"]*)?/i;
-            const matched = raw.match(pattern);
-            if (matched) return String(matched[0] || '').replace(/[，。；、]+$/g, '');
+            const providerMeta = (window.providerMeta || []).find(m => m.name === normalizedProvider);
+            const providerLinkType = String(providerMeta?.link_type || '').trim().toLowerCase();
+            const links = raw.match(/(?:https?:\/\/)?[^\s<>'"]+/gi) || [];
+            for (const link of links) {
+                const candidate = String(link || '').replace(/[，。；、]+$/g, '');
+                if (!candidate) continue;
+                if (detectResourceLinkTypeByUrl(candidate) === providerLinkType) return candidate;
+            }
             return extractFirstHttpUrl(raw);
         }
 
@@ -1735,12 +1785,20 @@
                 return;
             }
             const provider = normalizeSubscriptionProvider(task.provider || '115', '115');
-            if (!['115', 'quark'].includes(provider)) {
+            const providerMeta = (window.providerMeta || []).find(m => m.name === provider);
+            if (!providerMeta?.supports_subscription) {
                 showToast('当前订阅任务不支持扫描链接', { tone: 'warn', duration: 2600, placement: 'top-center' });
                 return;
             }
-            const providerLabel = provider === 'quark' ? '夸克' : '115';
-            const example = provider === 'quark' ? 'https://pan.quark.cn/s/xxxxxx' : 'https://115.com/s/xxxxxxx?password=abcd';
+            const providerLabel = getSubscriptionProviderLabel(provider);
+            const exampleMap = {
+                '115': 'https://115.com/s/xxxxxxx?password=abcd',
+                quark: 'https://pan.quark.cn/s/xxxxxx',
+                aliyun: 'https://www.alipan.com/s/xxxxxx',
+                '123pan': 'https://www.123pan.com/s/xxxxxx',
+                tianyi: 'https://cloud.189.cn/t/xxxxxx',
+            };
+            const example = exampleMap[provider] || 'https://example.com/s/xxxxxx';
             const titleEl = document.getElementById('subscription-link-scan-title');
             const eyebrowEl = document.getElementById('subscription-link-scan-eyebrow');
             const taskNameEl = document.getElementById('subscription-link-scan-task-name');
@@ -1781,13 +1839,20 @@
             const normalizedRaw = String(rawText || '').trim();
             const task = getSubscriptionTaskByName(name);
             const provider = normalizeSubscriptionProvider(task?.provider || '115', '115');
+            const providerMeta = (window.providerMeta || []).find(m => m.name === provider);
+            const providerLinkType = String(providerMeta?.link_type || '').trim().toLowerCase();
             const linkUrl = extractFirstSubscriptionShareUrl(normalizedRaw, provider);
-            const validLink = provider === '115'
-                ? /(?:https?:\/\/)?(?:115cdn|115|anxia)\.com\/s\/[a-z0-9]+/i.test(linkUrl)
-                : /(?:https?:\/\/)?(?:pan|www)\.quark\.cn\/s\/[a-z0-9]+/i.test(linkUrl);
+            const validLink = !!providerLinkType && detectResourceLinkTypeByUrl(linkUrl) === providerLinkType;
             if (!linkUrl || !validLink) {
-                const example = provider === '115' ? 'https://115.com/s/xxxxxxx?password=abcd' : 'https://pan.quark.cn/s/xxxxxx';
-                const providerText = provider === '115' ? '115 分享链接' : '夸克分享链接';
+                const exampleMap = {
+                    '115': 'https://115.com/s/xxxxxxx?password=abcd',
+                    quark: 'https://pan.quark.cn/s/xxxxxx',
+                    aliyun: 'https://www.alipan.com/s/xxxxxx',
+                    '123pan': 'https://www.123pan.com/s/xxxxxx',
+                    tianyi: 'https://cloud.189.cn/t/xxxxxx',
+                };
+                const example = exampleMap[provider] || 'https://example.com/s/xxxxxx';
+                const providerText = `${getSubscriptionProviderLabel(provider)} 分享链接`;
                 setSubscriptionLinkScanError(`请粘贴有效的${providerText}，例如 ${example}`);
                 return;
             }
@@ -2043,7 +2108,8 @@
                         tone: 'episodes',
                     })
                     : '';
-                const linkScanButton = ['115', 'quark'].includes(provider)
+                const providerMeta = (window.providerMeta || []).find(m => m.name === provider);
+                const linkScanButton = providerMeta?.supports_subscription
                     ? buildSubscriptionTaskIconButton({
                         action: 'scan-link',
                         taskName,

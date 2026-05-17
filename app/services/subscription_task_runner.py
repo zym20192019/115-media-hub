@@ -11,6 +11,8 @@ globals().update(
     }
 )
 
+from ..providers.registry import get_or_none as _get_provider_or_none
+
 
 def _format_subscription_matched_episode_summary(episodes: Any) -> str:
     normalized: List[int] = []
@@ -315,7 +317,10 @@ def _pick_subscription_candidate_manifest_prewarm_rows(
     allow_zero_resource_id: bool = False,
 ) -> List[Dict[str, Any]]:
     normalized_provider = normalize_subscription_provider(provider, fallback="115")
-    expected_link_type = "quark" if normalized_provider == "quark" else "115share"
+    provider_meta = _get_provider_or_none(normalized_provider)
+    expected_link_type = str(getattr(provider_meta, "link_type", "") or "").strip() or (
+        "quark" if normalized_provider == "quark" else "115share"
+    )
     limit = max(0, int(max_candidates or 0))
     if limit <= 0:
         return []
@@ -558,9 +563,10 @@ def _build_manual_subscription_search_result(
     provider: str,
 ) -> Dict[str, Any]:
     normalized_provider = normalize_subscription_provider(provider, fallback="115")
-    link_type = "quark" if normalized_provider == "quark" else "115share"
-    provider_label = "夸克" if normalized_provider == "quark" else "115"
-    keyword_label = "manual-quark-link" if normalized_provider == "quark" else "manual-115-link"
+    provider_meta = _get_provider_or_none(normalized_provider)
+    link_type = str(getattr(provider_meta, "link_type", "") or "").strip() or ("quark" if normalized_provider == "quark" else "115share")
+    provider_label = str(getattr(provider_meta, "label", "") or normalized_provider).strip()
+    keyword_label = f"manual-{normalized_provider}-link"
     link_url = str(manual_candidate.get("link_url", "") or "").strip()
     raw_text = str(manual_candidate.get("raw_text", "") or link_url).strip()
     receive_code = normalize_receive_code(manual_candidate.get("receive_code", ""))
@@ -674,6 +680,9 @@ def _build_fixed_115_subscription_search_result(
 ) -> Dict[str, Any]:
     normalized_link = str(link_url or "").strip()
     normalized_receive_code = normalize_receive_code(receive_code)
+    provider = normalize_subscription_provider(task.get("provider", "115"), fallback="115")
+    provider_meta = _get_provider_or_none(provider)
+    provider_link_type = str(getattr(provider_meta, "link_type", "") or "").strip() or "115share"
     fixed_item = {
         "id": 0,
         "source_type": "subscription_fixed_link_fallback",
@@ -681,7 +690,7 @@ def _build_fixed_115_subscription_search_result(
         "channel_name": "",
         "title": str(task.get("title", "") or task_name or "固定分享链接").strip() or "固定分享链接",
         "link_url": normalized_link,
-        "link_type": "115share",
+        "link_type": provider_link_type,
         "message_url": "",
         "source_post_id": "",
         "raw_text": normalized_link,
@@ -731,7 +740,7 @@ def _build_fixed_115_subscription_search_result(
             "relaxed_candidates": 0,
             "search_errors": 0,
             "best_score": 100,
-            "provider": "115",
+            "provider": provider,
         },
     }
 
@@ -2285,6 +2294,9 @@ async def run_subscription_task(
         update_subscription_summary("任务失败", config_error)
         return
     provider = normalize_subscription_provider(task.get("provider", "115"), fallback="115")
+    provider_meta = _get_provider_or_none(provider)
+    provider_link_type = str(getattr(provider_meta, "link_type", "") or "").strip() or ("quark" if provider == "quark" else "115share")
+    provider_label = str(getattr(provider_meta, "label", "") or provider).strip()
     subscription_run_id = _build_subscription_run_id(task_name)
     # 批次收口刷新改为固定内置策略，不再由设置项切换。
     batch_refresh_enabled = provider == "115"
@@ -2375,13 +2387,13 @@ async def run_subscription_task(
             )
             return
         await write_subscription_section("执行链路")
-        await write_subscription_log("网盘链路: 115（资源搜索与导入链路）", "info")
+        await write_subscription_log(f"网盘链路: {provider_label}（资源搜索与导入链路）", "info")
         task_share_subdir = normalize_relative_path(str(task.get("share_subdir", "") or "").strip())
         task_share_subdir_cid = _normalize_subscription_share_subdir_cid(task.get("share_subdir_cid", ""))
         task_share_link_url = str(task.get("share_link_url", "") or "").strip()
         task_share_link_receive_code = normalize_receive_code(task.get("share_link_receive_code", ""))
         task_share_link_type = resolve_resource_link_type("", task_share_link_url)
-        use_fixed_share_link = bool(task_share_link_url) and task_share_link_type == "115share"
+        use_fixed_share_link = bool(task_share_link_url) and task_share_link_type == provider_link_type
         manual_link_enabled = isinstance(manual_candidate, dict) and bool(str(manual_candidate.get("link_url", "") or "").strip())
         fixed_link_fallback_enabled = (
             (not manual_link_enabled)
@@ -2396,7 +2408,7 @@ async def run_subscription_task(
         task_share_scope_label = _format_subscription_share_scope_label(task_share_subdir, task_share_subdir_cid)
         if task_share_link_url and (not use_fixed_share_link):
             await write_subscription_log(
-                "固定链接已配置但不是 115 分享链接，已自动忽略并继续资源搜索",
+                f"固定链接已配置但不是 {provider_label} 分享链接，已自动忽略并继续资源搜索",
                 "warn",
             )
         if manual_link_enabled:
@@ -2406,7 +2418,7 @@ async def run_subscription_task(
             )
         elif fixed_link_fallback_enabled:
             await write_subscription_log(
-                "固定链接兜底已启用：将先执行资源搜索，再把固定 115 分享链接追加为备选候选",
+                f"固定链接兜底已启用：将先执行资源搜索，再把固定 {provider_label} 分享链接追加为备选候选",
                 "info",
             )
         elif use_fixed_share_link:
@@ -2471,7 +2483,7 @@ async def run_subscription_task(
         search_result: Dict[str, Any] = {}
         resource_search_result: Dict[str, Any] = {}
         if manual_link_enabled:
-            search_result = _build_manual_subscription_search_result(task, task_name, manual_candidate or {}, "115")
+            search_result = _build_manual_subscription_search_result(task, task_name, manual_candidate or {}, provider)
         else:
             resource_search_result = await find_subscription_task_match_candidate_by_search(
                 task,
@@ -2584,7 +2596,7 @@ async def run_subscription_task(
             )
             await _write_subscription_search_diagnostics(search_stats, search_label)
             if unsupported_items > 0:
-                supported_link_label = "夸克分享" if provider == "quark" else "115 分享"
+                supported_link_label = f"{provider_label} 分享"
                 await write_subscription_log(
                     f"已过滤 {unsupported_items} 条不支持链接（仅支持 {supported_link_label}）",
                     "warn",
@@ -2733,7 +2745,7 @@ async def run_subscription_task(
                 detail = f"自定义排除词已过滤候选 {int(search_stats.get('exclude_keyword_filtered', 0) or 0)} 条，当前暂无可导入资源"
                 status = "waiting"
             elif int(search_stats.get("supported_items", 0) or 0) <= 0:
-                supported_link_label = "夸克分享" if provider == "quark" else "115 分享"
+                supported_link_label = f"{provider_label} 分享"
                 detail = f"命中资源均非可导入类型（仅支持 {supported_link_label}），请调整频道或关键词"
                 status = "waiting"
             elif int(search_stats.get("strict_title_filtered", 0) or 0) > 0 and int(search_stats.get("scored_items", 0) or 0) <= 0:
@@ -2791,9 +2803,11 @@ async def run_subscription_task(
         check_subscription_cancelled()
         _subscription_stage_timer_enter(stage_timer, "calibrate")
         upsert_subscription_task_state(task_name, status="running", progress=45, detail="正在准备目标目录")
-        cookie_115 = str(cfg.get("cookie_115", "")).strip()
+        if not provider_meta:
+            raise RuntimeError("订阅网盘类型不支持")
+        cookie_115 = provider_meta.get_cookie(cfg)
         folder_id = await asyncio.to_thread(
-            ensure_115_folder_id_by_path,
+            provider_meta.ensure_folder_id_by_path,
             cookie_115,
             effective_savepath,
         )
@@ -2808,12 +2822,25 @@ async def run_subscription_task(
         if task["media_type"] == "tv":
             upsert_subscription_task_state(task_name, status="running", progress=47, detail="正在读取目标目录已落盘剧集")
             try:
-                scan_result = await asyncio.to_thread(
-                    _scan_115_existing_tv_episodes,
-                    cookie_115,
-                    folder_id,
-                    task,
-                )
+                if provider == "115":
+                    scan_result = await asyncio.to_thread(
+                        _scan_115_existing_tv_episodes,
+                        cookie_115,
+                        folder_id,
+                        task,
+                    )
+                else:
+                    scan_result = {
+                        "episodes": [],
+                        "scanned_dirs": 0,
+                        "scanned_entries": 0,
+                        "failed_dirs": 0,
+                        "truncated": False,
+                    }
+                    await write_subscription_log(
+                        f"{provider_label} 目标目录暂不做本地剧集反扫，本次将主要依赖订阅账本与分享清单判断缺集",
+                        "info",
+                    )
                 scan_episodes = scan_result.get("episodes", []) if isinstance(scan_result.get("episodes"), list) else []
                 existing_folder_episodes = _clamp_episode_values(
                     {max(0, int(item or 0)) for item in scan_episodes if max(0, int(item or 0)) > 0},
@@ -3110,6 +3137,14 @@ async def run_subscription_task(
             await asyncio.sleep(attempt_interval_seconds)
 
         async def rescan_existing_tv_episodes() -> Tuple[Dict[str, Any], Set[int]]:
+            if provider != "115":
+                return {
+                    "episodes": [],
+                    "scanned_dirs": 0,
+                    "scanned_entries": 0,
+                    "failed_dirs": 0,
+                    "truncated": False,
+                }, set()
             scan_result = await asyncio.to_thread(
                 _scan_115_existing_tv_episodes,
                 cookie_115,
@@ -3145,9 +3180,9 @@ async def run_subscription_task(
                 cookie=cookie_115,
                 task=task,
                 candidates=attempt_candidates,
-                provider="115",
+                provider=provider,
                 manifest_cache=share_manifest_cache,
-                label="115",
+                label=provider_label,
                 share_subdir="",
                 share_subdir_cid="",
                 subdir_selection_cache=share_subdir_selection_cache,
@@ -3179,12 +3214,12 @@ async def run_subscription_task(
             episode_label = _format_candidate_episode_label(candidate)
             candidate_link_url = _normalize_subscription_candidate_link(item.get("link_url", ""))
             candidate_link_type = resolve_resource_link_type(item.get("link_type", ""), candidate_link_url)
-            candidate_manifest_cache_key = _build_subscription_candidate_manifest_cache_key("115", candidate)
+            candidate_manifest_cache_key = _build_subscription_candidate_manifest_cache_key(provider, candidate)
             candidate_manifest_payload = share_manifest_cache.get(candidate_manifest_cache_key)
             fixed_share_seed_candidate = (
                 fixed_link_fallback_enabled
                 and resource_id <= 0
-                and candidate_link_type == "115share"
+                and candidate_link_type == provider_link_type
             )
             if resource_id <= 0 and not fixed_share_seed_candidate:
                 continue
@@ -3270,8 +3305,8 @@ async def run_subscription_task(
                         )
                         if missing_for_candidate:
                             missing_ratio = len(missing_for_candidate) / max(1, len(candidate_episode_values))
-                            # 非 115 分享资源无法做精细转存，若只缺很少集数，优先跳过避免整包重复。
-                            if candidate_link_type != "115share" and missing_ratio <= 0.35:
+                            # 非当前订阅网盘分享资源无法做精细转存，若只缺很少集数，优先跳过避免整包重复。
+                            if candidate_link_type != provider_link_type and missing_ratio <= 0.35:
                                 skipped_existing_candidates += 1
                                 await write_subscription_log(
                                     (
@@ -3363,7 +3398,7 @@ async def run_subscription_task(
                     else ""
                 )
                 runtime_scan_tail = _format_subscription_share_scan_log_tail(fixed_share_runtime_manifest)
-                scan_settings = normalize_subscription_scan_settings(task, "115")
+                scan_settings = normalize_subscription_scan_settings(task, provider)
                 await write_subscription_log(
                     (
                         f"固定链接运行期缓存已刷新：定位子目录 {_format_elapsed_seconds(runtime_subdir_elapsed_seconds)}，"
@@ -3375,7 +3410,7 @@ async def run_subscription_task(
                     ),
                     "info",
                 )
-            if candidate_link_type == "115share" and candidate_share_scope_enabled:
+            if candidate_link_type == provider_link_type and candidate_share_scope_enabled:
                 if fixed_share_seed_candidate and fixed_share_runtime_initialized:
                     resolved_subdir_selection = fixed_share_runtime_selection
                     subdir_stats = fixed_share_runtime_subdir_stats
@@ -3456,7 +3491,7 @@ async def run_subscription_task(
                         continue
                 if (
                     selected_ids
-                    and candidate_link_type == "115share"
+                    and candidate_link_type == provider_link_type
                     and task.get("media_type") == "tv"
                     and not (fixed_share_seed_candidate and fixed_share_runtime_initialized)
                 ):
@@ -3518,7 +3553,7 @@ async def run_subscription_task(
             candidate_folder_id = str(savepath_folder_id_cache.get(candidate_savepath, "") or "").strip()
             if not candidate_folder_id:
                 candidate_folder_id = await asyncio.to_thread(
-                    ensure_115_folder_id_by_path,
+                    provider_meta.ensure_folder_id_by_path,
                     cookie_115,
                     candidate_savepath,
                 )
@@ -3537,7 +3572,7 @@ async def run_subscription_task(
                     f"候选资源 #{index} 为固定分享链接兜底候选，本次强制重新导入以捕捉目录更新",
                     "info",
                 )
-            if existing and candidate_link_type == "115share" and candidate_share_scope_enabled:
+            if existing and candidate_link_type == provider_link_type and candidate_share_scope_enabled:
                 existing_extra = existing.get("extra") if isinstance(existing.get("extra"), dict) else {}
                 existing_share_subdir = normalize_relative_path(
                     str(existing_extra.get("subscription_share_subdir", "") or "").strip()
@@ -3637,7 +3672,7 @@ async def run_subscription_task(
                     if task_share_link_receive_code:
                         job_payload["receive_code"] = task_share_link_receive_code
                 if (
-                    candidate_link_type == "115share"
+                    candidate_link_type == provider_link_type
                     and (
                         resolved_subdir_selection.get("selected_ids", [])
                         if isinstance(resolved_subdir_selection.get("selected_ids"), list)
@@ -3742,7 +3777,7 @@ async def run_subscription_task(
                             continue
                 if (
                     task["media_type"] == "tv"
-                    and candidate_link_type == "115share"
+                    and candidate_link_type == provider_link_type
                     and (candidate_episode_values or candidate_season_mismatch_deferred)
                     and (not forced_precise_selection_applied)
                 ):
@@ -3873,7 +3908,7 @@ async def run_subscription_task(
                             continue
                 if (
                     task["media_type"] == "tv"
-                    and candidate_link_type == "115share"
+                    and candidate_link_type == provider_link_type
                     and (not candidate_episode_values)
                     and (not forced_precise_selection_applied)
                     and candidate_manifest_payload
@@ -3986,7 +4021,7 @@ async def run_subscription_task(
                 if (
                     task["media_type"] == "tv"
                     and existing_episode_scan_ready
-                    and candidate_link_type == "115share"
+                    and candidate_link_type == provider_link_type
                     and candidate_episode_values
                     and (not forced_precise_selection_applied)
                 ):
@@ -4093,7 +4128,7 @@ async def run_subscription_task(
                         continue
                 if (
                     task["media_type"] == "tv"
-                    and candidate_link_type == "115share"
+                    and candidate_link_type == provider_link_type
                     and not is_subscription_multi_season_mode(task)
                     and not _is_115_tv_file_level_selection(job_payload.get("share_selection", {}))
                 ):
@@ -4130,7 +4165,7 @@ async def run_subscription_task(
                 normalized_job_selection = normalize_share_selection_meta(job_payload.get("share_selection", {}))
                 if (
                     task["media_type"] == "tv"
-                    and candidate_link_type == "115share"
+                    and candidate_link_type == provider_link_type
                     and is_subscription_multi_season_mode(task)
                 ):
                     split_groups, split_stats = _split_tv_share_selection_by_season(
@@ -4165,7 +4200,7 @@ async def run_subscription_task(
                             group_folder_id = str(savepath_folder_id_cache.get(group_savepath, "") or "").strip()
                             if not group_folder_id:
                                 group_folder_id = await asyncio.to_thread(
-                                    ensure_115_folder_id_by_path,
+                                    provider_meta.ensure_folder_id_by_path,
                                     cookie_115,
                                     group_savepath,
                                 )
@@ -4333,8 +4368,9 @@ async def run_subscription_task(
                     if (
                         latest_status in ("submitted", "completed")
                         and task["media_type"] == "tv"
+                        and provider == "115"
                         and existing_episode_scan_ready
-                        and candidate_link_type == "115share"
+                        and candidate_link_type == provider_link_type
                         and is_115_share_receive_duplicate_response((latest_job or {}).get("response", {}))
                     ):
                         duplicate_validation_applied = True

@@ -1799,9 +1799,10 @@ class QuarkProvider(CloudProvider):
     link_type = "quark"
     auth_type = "cookie"
     config_keys = ["cookie_quark"]
+    supports_subscription = True
     supports_offline = False
-    supports_fixed_share_link = False
-    supports_strm = True
+    supports_fixed_share_link = True
+    supports_strm = False
     supports_monitor = False
 
     def list_entries_payload(self, cookie, cid="0", folders_only=False):
@@ -1820,16 +1821,62 @@ class QuarkProvider(CloudProvider):
         return ensure_quark_folder_id_by_path(cookie, relative_path)
 
     def resolve_share_payload(self, cookie, share_url, raw_text="", receive_code=""):
-        return resolve_quark_share_payload(cookie, share_url, raw_text, receive_code)
+        payload = resolve_quark_share_payload(cookie, share_url, raw_text, receive_code)
+        payload["url"] = str(share_url or "").strip()
+        payload["raw_text"] = str(raw_text or "")
+        return payload
 
     def list_share_entries(self, cookie, share_payload, cid="0", offset=0, limit=200):
-        return list_quark_share_entries(cookie, share_payload, cid, offset, limit)
+        payload = share_payload if isinstance(share_payload, dict) else {}
+        return list_quark_share_entries(
+            cookie,
+            str(payload.get("url", "") or payload.get("share_url", "") or "").strip(),
+            str(payload.get("raw_text", "") or ""),
+            cid,
+            str(payload.get("receive_code", "") or "").strip(),
+            False,
+            45,
+            max(0, int(offset or 0)),
+            max(20, min(int(limit or 200), 400)),
+            1,
+            False,
+        )
 
     def prepare_share_receive(self, cookie, share_payload, cid="0"):
-        return prepare_quark_share_save(cookie, share_payload, cid)
+        payload = share_payload if isinstance(share_payload, dict) else {}
+        selected_ids = payload.get("selected_ids", []) if isinstance(payload.get("selected_ids"), list) else []
+        selected_entries = payload.get("selected_entries", []) if isinstance(payload.get("selected_entries"), list) else []
+        prepared = prepare_quark_share_save(
+            cookie,
+            str(payload.get("url", "") or payload.get("share_url", "") or "").strip(),
+            str(payload.get("raw_text", "") or ""),
+            selected_ids,
+            str(payload.get("receive_code", "") or "").strip(),
+            selected_entries=selected_entries,
+        )
+        return {**payload, **prepared, "target_cid": str(cid or "0").strip() or "0"}
 
     def submit_share_receive(self, cookie, receive_payload, files):
-        return submit_quark_share_save(cookie, receive_payload, files)
+        payload = receive_payload if isinstance(receive_payload, dict) else {}
+        selected_entries = payload.get("selected_entries", []) if isinstance(payload.get("selected_entries"), list) else []
+        if not selected_entries:
+            selected_entries = files or []
+        selected_ids = payload.get("selected_ids", []) if isinstance(payload.get("selected_ids"), list) else []
+        if not selected_ids:
+            selected_ids = [
+                str(item.get("id", "")).strip()
+                for item in selected_entries
+                if isinstance(item, dict) and str(item.get("id", "")).strip()
+            ]
+        return submit_quark_share_save(
+            cookie,
+            str(payload.get("url", "") or payload.get("share_url", "") or "").strip(),
+            str(payload.get("target_cid", "") or payload.get("folder_id", "") or "0").strip() or "0",
+            str(payload.get("raw_text", "") or ""),
+            selected_ids,
+            str(payload.get("receive_code", "") or "").strip(),
+            selected_entries,
+        )
 
     def probe_connectivity(self, cookie):
         try:

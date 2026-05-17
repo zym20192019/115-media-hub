@@ -660,6 +660,99 @@
         .sign115-settings-status-card .sign115-settings-status-hint {
             color: #cbd5e1;
         }
+        .cookie-health-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            border: 1px solid rgba(51, 65, 85, 0.82);
+            border-radius: 0.75rem;
+            background: rgba(15, 23, 42, 0.52);
+        }
+        .cookie-health-chips {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            min-width: 0;
+        }
+        .cookie-health-chip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.38rem;
+            min-height: 2rem;
+            padding: 0.38rem 0.72rem;
+            border: 1px solid rgba(71, 85, 105, 0.82);
+            border-radius: 999px;
+            background: rgba(30, 41, 59, 0.72);
+            color: #cbd5e1;
+            font-size: 0.76rem;
+            font-weight: 800;
+            line-height: 1.2;
+            white-space: nowrap;
+            transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+        }
+        .cookie-health-chip:not(:disabled):hover {
+            transform: translateY(-1px);
+            border-color: rgba(125, 211, 252, 0.55);
+        }
+        .cookie-health-chip:disabled {
+            cursor: not-allowed;
+        }
+        .cookie-health-chip-dot {
+            width: 0.5rem;
+            height: 0.5rem;
+            border-radius: 999px;
+            flex: 0 0 auto;
+            box-shadow: 0 0 0 2px rgba(2, 6, 23, 0.24);
+        }
+        .cookie-health-chip--valid {
+            border-color: rgba(16, 185, 129, 0.58);
+            background: linear-gradient(135deg, rgba(5, 150, 105, 0.36), rgba(6, 95, 70, 0.24));
+            color: #dcfce7;
+        }
+        .cookie-health-chip--error {
+            border-color: rgba(248, 113, 113, 0.62);
+            background: linear-gradient(135deg, rgba(220, 38, 38, 0.32), rgba(127, 29, 29, 0.25));
+            color: #fee2e2;
+        }
+        .cookie-health-chip--checking {
+            border-color: rgba(56, 189, 248, 0.58);
+            background: linear-gradient(135deg, rgba(2, 132, 199, 0.34), rgba(30, 64, 175, 0.22));
+            color: #e0f2fe;
+        }
+        .cookie-health-chip--pending {
+            border-color: rgba(245, 158, 11, 0.52);
+            background: linear-gradient(135deg, rgba(180, 83, 9, 0.26), rgba(92, 64, 17, 0.24));
+            color: #fde68a;
+        }
+        .cookie-health-chip--disabled {
+            opacity: 0.58;
+            color: #94a3b8;
+        }
+        .cookie-health-check-all-btn {
+            flex: 0 0 auto;
+            min-height: 2.25rem;
+            padding: 0.45rem 0.9rem;
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 0.7rem;
+            background: #0284c7;
+            color: #ffffff;
+            font-size: 0.78rem;
+            font-weight: 900;
+            transition: background-color 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
+        }
+        .cookie-health-check-all-btn:hover:not(:disabled) {
+            border-color: rgba(125, 211, 252, 0.75);
+            background: #0ea5e9;
+        }
+        .cookie-health-check-all-btn:disabled {
+            opacity: 0.62;
+            cursor: wait;
+        }
         .ui-checkbox-sm {
             width: 0.96rem;
             min-width: 0.96rem;
@@ -7843,6 +7936,50 @@
         html.theme-day .text-sky-400,
         html.theme-day .text-sky-500 { color: #0369a1 !important; }
         html.theme-day .text-sky-700 { color: #075985 !important; }
+        html.theme-day .cookie-health-bar {
+            border-color: rgba(148, 163, 184, 0.74);
+            background: rgba(248, 250, 252, 0.95);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84);
+        }
+        html.theme-day .cookie-health-chip {
+            border-color: rgba(148, 163, 184, 0.7);
+            background: #e2e8f0;
+            color: #334155;
+        }
+        html.theme-day .cookie-health-chip-dot {
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.78);
+        }
+        html.theme-day .cookie-health-chip--valid {
+            border-color: rgba(21, 128, 61, 0.46);
+            background: linear-gradient(135deg, rgba(187, 247, 208, 0.98), rgba(220, 252, 231, 0.98));
+            color: #14532d;
+        }
+        html.theme-day .cookie-health-chip--error {
+            border-color: rgba(220, 38, 38, 0.42);
+            background: linear-gradient(135deg, rgba(254, 202, 202, 0.98), rgba(254, 226, 226, 0.98));
+            color: #7f1d1d;
+        }
+        html.theme-day .cookie-health-chip--checking {
+            border-color: rgba(2, 132, 199, 0.45);
+            background: linear-gradient(135deg, rgba(186, 230, 253, 0.98), rgba(224, 242, 254, 0.98));
+            color: #075985;
+        }
+        html.theme-day .cookie-health-chip--pending {
+            border-color: rgba(217, 119, 6, 0.42);
+            background: linear-gradient(135deg, rgba(253, 230, 138, 0.98), rgba(254, 243, 199, 0.98));
+            color: #78350f;
+        }
+        html.theme-day .cookie-health-chip--disabled {
+            color: #64748b;
+        }
+        html.theme-day .cookie-health-check-all-btn {
+            border-color: rgba(2, 132, 199, 0.42);
+            background: #0284c7;
+            color: #ffffff;
+        }
+        html.theme-day .cookie-health-check-all-btn:hover:not(:disabled) {
+            background: #0369a1;
+        }
         html.theme-day #cookie-health-115-text.text-emerald-200,
         html.theme-day #cookie-health-quark-text.text-emerald-200 {
             color: #166534 !important;

@@ -322,6 +322,52 @@ def _build_resource_folder_response(
     }
 
 
+def _normalize_provider_share_entries_result(
+    provider: Any,
+    share_payload: Dict[str, Any],
+    result: Dict[str, Any],
+    *,
+    cid: str,
+    offset: int,
+    limit: int,
+) -> Dict[str, Any]:
+    payload = result if isinstance(result, dict) else {}
+    entries = payload.get("entries", []) if isinstance(payload.get("entries", []), list) else []
+    folder_count = sum(1 for entry in entries if bool(entry.get("is_dir")))
+    file_count = max(0, len(entries) - folder_count)
+    total = parse_int(payload.get("count", payload.get("total", len(entries))), default=len(entries))
+    normalized_offset = max(0, parse_int(payload.get("offset", offset), default=offset))
+    next_offset = parse_int(payload.get("next_offset", normalized_offset + len(entries)), default=normalized_offset + len(entries))
+    share_meta = payload.get("share", {}) if isinstance(payload.get("share"), dict) else {}
+    title = (
+        str(payload.get("share_title", "") or "").strip()
+        or str(share_meta.get("title", "") or share_meta.get("share_name", "") or "").strip()
+    )
+    share_code = (
+        str(payload.get("share_code", "") or "").strip()
+        or str(share_payload.get("share_code", "") or share_payload.get("pwd_id", "") or share_payload.get("share_id", "") or "").strip()
+    )
+    receive_code = (
+        str(payload.get("receive_code", "") or "").strip()
+        or str(share_payload.get("receive_code", "") or "").strip()
+    )
+    summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+    if not summary:
+        summary = {"folder_count": folder_count, "file_count": file_count}
+    return {
+        **payload,
+        "entries": entries,
+        "summary": summary,
+        "share_title": title or str(getattr(provider, "label", "") or "").strip(),
+        "share_code": share_code,
+        "receive_code": receive_code,
+        "count": total,
+        "offset": normalized_offset,
+        "next_offset": next_offset,
+        "has_more": bool(payload.get("has_more", False)) or (total > next_offset),
+    }
+
+
 def _run_resource_browse_io_timed(func, submitted_mono: float, args: tuple, kwargs: Dict[str, Any]) -> Tuple[Any, Dict[str, Any]]:
     started_mono = time.monotonic()
     result = func(*args, **kwargs)
@@ -798,28 +844,34 @@ async def create_resource_job_endpoint(request: Request) -> Dict[str, Any]:
         if not str(resource.get("link_url", "")).strip():
             return JSONResponse(status_code=400, content={"ok": False, "msg": "当前资源没有可导入链接"})
     link_type = resolve_resource_link_type(resource.get("link_type", ""), resource.get("link_url", ""))
-    if link_type not in ("magnet", "115share", "quark"):
-        return JSONResponse(status_code=400, content={"ok": False, "msg": "当前仅支持 magnet 下载、115 分享转存和夸克分享转存"})
+    from app.providers.registry import get_by_link_type as _registry_get_by_link_type
+
+    share_provider = _registry_get_by_link_type(link_type)
+    is_share_receive_link = bool(share_provider and share_provider.supports_share_receive)
+    if link_type != "magnet" and not is_share_receive_link:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "当前仅支持 magnet 下载和已启用网盘的分享转存"})
     receive_code_raw = str(data.get("receive_code", "") or "").strip()
     receive_code = normalize_receive_code(receive_code_raw)
-    if link_type in ("115share", "quark") and receive_code_raw and not receive_code:
+    if is_share_receive_link and receive_code_raw and not receive_code:
         return JSONResponse(status_code=400, content={"ok": False, "msg": "提取码格式不正确，请输入 1-16 位字母或数字"})
 
     cfg = get_config()
-    if link_type in ("magnet", "115share"):
+    if link_type == "magnet":
         if not str(cfg.get("cookie_115", "")).strip():
             return JSONResponse(status_code=400, content={"ok": False, "msg": "请先在参数配置中填写 115 Cookie"})
-    elif not str(cfg.get("cookie_quark", "")).strip():
-        return JSONResponse(status_code=400, content={"ok": False, "msg": "请先在参数配置中填写 Quark Cookie"})
+    elif share_provider:
+        enabled_map = cfg.get("provider_enabled", {}) if isinstance(cfg.get("provider_enabled", {}), dict) else {}
+        if not bool(enabled_map.get(share_provider.name, share_provider.name in ("115", "quark"))):
+            return JSONResponse(status_code=400, content={"ok": False, "msg": f"{share_provider.label} 未启用"})
+        if not share_provider.get_cookie(cfg):
+            return JSONResponse(status_code=400, content={"ok": False, "msg": f"请先在参数配置中填写 {share_provider.label} 认证信息"})
 
     savepath = normalize_relative_path(data.get("savepath", ""))
     if not savepath:
         return JSONResponse(status_code=400, content={"ok": False, "msg": "请填写网盘保存路径"})
     auto_refresh_requested = bool(data.get("auto_refresh", True))
-    allow_duplicate = bool(data.get("allow_duplicate", False)) and link_type in ("115share", "quark")
+    allow_duplicate = bool(data.get("allow_duplicate", False)) and is_share_receive_link
     provided_folder_id = str(data.get("folder_id", "") or "").strip()
-    if provided_folder_id and not provided_folder_id.isdigit():
-        provided_folder_id = ""
 
     async with resource_job_create_lock:
         existing = find_existing_resource_job(resource, savepath)
@@ -836,15 +888,18 @@ async def create_resource_job_endpoint(request: Request) -> Dict[str, Any]:
                     "msg": msg,
                     "job_id": existing.get("id", 0),
                     "status": existing_status,
-                    "duplicate_confirm_required": link_type in ("115share", "quark"),
+                    "duplicate_confirm_required": is_share_receive_link,
                     "link_type": link_type,
                 },
             )
 
         matched_monitor: Dict[str, Any] = {}
         monitor_task_name = ""
-        if link_type != "quark":
+        if link_type == "magnet":
             matched_monitor = match_monitor_task_for_savepath(cfg, savepath, provider="115")
+            monitor_task_name = matched_monitor.get("task_name", "")
+        elif share_provider and share_provider.supports_monitor:
+            matched_monitor = match_monitor_task_for_savepath(cfg, savepath, provider=share_provider.name)
             monitor_task_name = matched_monitor.get("task_name", "")
         # 路径解析会访问网盘上游，远端容器网络慢时不应阻塞点击请求。
         # 这里仅记录用户意图，具体 folder_id 由后台导入任务解析并写回。
@@ -856,12 +911,12 @@ async def create_resource_job_endpoint(request: Request) -> Dict[str, Any]:
             "sharetitle": str(data.get("sharetitle", "") or "").strip(),
             "monitor_task_name": monitor_task_name,
             "refresh_delay_seconds": max(0, int(data.get("refresh_delay_seconds", 0) or 0)),
-            "auto_refresh": (auto_refresh_requested and bool(monitor_task_name)) if link_type != "quark" else False,
+            "auto_refresh": auto_refresh_requested and bool(monitor_task_name),
             "extra": {
                 "job_source": "manual_import",
             },
         }
-        if link_type in ("115share", "quark"):
+        if is_share_receive_link:
             payload["share_selection"] = data.get("share_selection", {})
             if receive_code:
                 payload["receive_code"] = receive_code
@@ -871,9 +926,9 @@ async def create_resource_job_endpoint(request: Request) -> Dict[str, Any]:
     return {
         "ok": True,
         "job_id": job_id,
-        "monitor_task_name": monitor_task_name if link_type != "quark" else "",
+        "monitor_task_name": monitor_task_name,
         "auto_refresh": payload["auto_refresh"],
-        "monitor_scan_path": matched_monitor.get("full_path", "") if link_type != "quark" else "",
+        "monitor_scan_path": matched_monitor.get("full_path", ""),
     }
 
 
@@ -925,6 +980,179 @@ async def unified_create_folder(request: Request):
         raise HTTPException(status_code=400, detail=f"{p.label} 未配置认证信息")
     folder = await run_resource_browse_io(p.create_folder, cookie, cid, name)
     return JSONResponse(folder)
+
+
+@router.get("/resource/browse/{provider_name}/folders")
+async def get_provider_folders_endpoint(provider_name: str, request: Request) -> Dict[str, Any]:
+    from app.providers.registry import get as _registry_get
+
+    p = _registry_get(str(provider_name or "").strip())
+    if not p.supports_folder_browse:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"{p.label} 不支持目录浏览"})
+    cfg = get_config()
+    cookie = p.get_cookie(cfg)
+    if not cookie:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"请先配置 {p.label} 认证信息"})
+    cid = str(request.query_params.get("cid", "0") or "0").strip() or "0"
+    folders_only = request.query_params.get("folders_only") == "1"
+    compact = request.query_params.get("compact") == "1"
+    try:
+        payload = await run_resource_browse_io(p.list_entries_payload, cookie, cid, folders_only)
+        entries_all = payload.get("entries", []) if isinstance(payload.get("entries"), list) else []
+        summary = payload.get("summary", {}) if isinstance(payload.get("summary"), dict) else {}
+        if not summary:
+            folder_entries = [entry for entry in entries_all if entry.get("is_dir")]
+            summary = {
+                "folder_count": len(folder_entries),
+                "file_count": max(0, len(entries_all) - len(folder_entries)),
+            }
+        return _build_resource_folder_response(
+            cid,
+            entries_all,
+            summary,
+            folders_only=folders_only,
+            compact=compact,
+            entries_complete=not folders_only,
+        )
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": str(exc)})
+
+
+@router.post("/resource/browse/{provider_name}/folders/create")
+async def create_provider_folder_endpoint(provider_name: str, request: Request) -> Dict[str, Any]:
+    from app.providers.registry import get as _registry_get
+
+    p = _registry_get(str(provider_name or "").strip())
+    if not p.supports_folder_browse:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"{p.label} 不支持目录浏览"})
+    cfg = get_config()
+    cookie = p.get_cookie(cfg)
+    if not cookie:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"请先配置 {p.label} 认证信息"})
+    data = await request.json()
+    cid = str(data.get("cid", "0") or "0").strip() or "0"
+    name = str(data.get("name", "") or "").strip()
+    if not name:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "文件夹名称不能为空"})
+    try:
+        folder = await run_resource_browse_io(p.create_folder, cookie, cid, name)
+        return {"ok": True, "cid": cid, "folder": folder}
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": str(exc)})
+
+
+@router.get("/resource/browse/{provider_name}/share_entries")
+async def get_provider_share_entries_endpoint(provider_name: str, request: Request) -> Dict[str, Any]:
+    from app.providers.registry import get as _registry_get
+
+    p = _registry_get(str(provider_name or "").strip())
+    if not p.supports_share_receive:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"{p.label} 不支持分享转存"})
+    cfg = get_config()
+    cookie = p.get_cookie(cfg)
+    if not cookie:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"请先配置 {p.label} 认证信息"})
+
+    resource_id = int(request.query_params.get("resource_id", 0) or 0)
+    if resource_id <= 0:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "资源 ID 无效"})
+    resource = get_resource_item(resource_id)
+    if not resource:
+        return JSONResponse(status_code=404, content={"ok": False, "msg": "资源不存在"})
+    if resolve_resource_link_type(resource.get("link_type", ""), resource.get("link_url", "")) != p.link_type:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"当前资源不是 {p.label} 分享链接"})
+
+    cid = str(request.query_params.get("cid", "0") or "0").strip() or "0"
+    receive_code_raw = str(request.query_params.get("receive_code", "") or "").strip()
+    receive_code = normalize_receive_code(receive_code_raw)
+    if receive_code_raw and not receive_code:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "提取码格式不正确，请输入 1-16 位字母或数字"})
+    paged = request.query_params.get("paged") == "1"
+    folders_only = request.query_params.get("folders_only") == "1"
+    offset = max(0, parse_int(request.query_params.get("offset", 0), default=0))
+    limit = max(20, min(parse_int(request.query_params.get("limit", 200), default=200), 400))
+    try:
+        share_payload = await run_resource_browse_io(
+            p.resolve_share_payload,
+            cookie,
+            str(resource.get("link_url", "")).strip(),
+            str(resource.get("raw_text", "") or ""),
+            receive_code,
+        )
+        result = await run_resource_browse_io(
+            p.list_share_entries,
+            cookie,
+            share_payload,
+            cid,
+            offset,
+            limit,
+        )
+        normalized_result = _normalize_provider_share_entries_result(
+            p,
+            share_payload,
+            result,
+            cid=cid,
+            offset=offset,
+            limit=limit,
+        )
+        return _build_resource_share_entries_response(
+            cid,
+            normalized_result,
+            offset=offset,
+            paged=paged,
+            folders_only=folders_only,
+        )
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": str(exc)})
+
+
+@router.post("/resource/browse/{provider_name}/share_entries_preview")
+async def preview_provider_share_entries_endpoint(provider_name: str, request: Request) -> Dict[str, Any]:
+    from app.providers.registry import get as _registry_get
+
+    p = _registry_get(str(provider_name or "").strip())
+    if not p.supports_share_receive:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"{p.label} 不支持分享转存"})
+    cfg = get_config()
+    cookie = p.get_cookie(cfg)
+    if not cookie:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"请先配置 {p.label} 认证信息"})
+    data = await request.json()
+    link_url = str(data.get("link_url", "") or "").strip()
+    raw_text = str(data.get("raw_text", "") or "").strip()
+    receive_code_raw = str(data.get("receive_code", "") or "").strip()
+    receive_code = normalize_receive_code(receive_code_raw)
+    if receive_code_raw and not receive_code:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "提取码格式不正确，请输入 1-16 位字母或数字"})
+    if not link_url:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": "资源链接为空"})
+    if resolve_resource_link_type("", link_url) != p.link_type:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": f"请填写 {p.label} 分享链接"})
+    cid = str(data.get("cid", "0") or "0").strip() or "0"
+    paged = bool(data.get("paged", False))
+    folders_only = bool(data.get("folders_only", False))
+    offset = max(0, parse_int(data.get("offset", 0), default=0))
+    limit = max(20, min(parse_int(data.get("limit", 200), default=200), 400))
+    try:
+        share_payload = await run_resource_browse_io(p.resolve_share_payload, cookie, link_url, raw_text, receive_code)
+        result = await run_resource_browse_io(p.list_share_entries, cookie, share_payload, cid, offset, limit)
+        normalized_result = _normalize_provider_share_entries_result(
+            p,
+            share_payload,
+            result,
+            cid=cid,
+            offset=offset,
+            limit=limit,
+        )
+        return _build_resource_share_entries_response(
+            cid,
+            normalized_result,
+            offset=offset,
+            paged=paged,
+            folders_only=folders_only,
+        )
+    except Exception as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "msg": str(exc)})
 
 
 @router.get("/resource/115/folders")

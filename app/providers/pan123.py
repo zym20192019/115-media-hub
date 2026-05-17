@@ -13,7 +13,9 @@ class Pan123Provider(CloudProvider):
     link_type = "123pan"
     auth_type = "cookie"
     config_keys = ["cookie_123pan"]
+    supports_subscription = True
     supports_offline = True
+    supports_fixed_share_link = True
 
     def _headers(self, cookie: str) -> dict:
         return {
@@ -54,6 +56,9 @@ class Pan123Provider(CloudProvider):
                 "id": str(item.get("fileId", item.get("fileID", ""))),
                 "name": str(item.get("fileName", "")),
                 "type": entry_type,
+                "is_dir": entry_type == "folder",
+                "cid": str(item.get("fileId", item.get("fileID", ""))) if entry_type == "folder" else "",
+                "fid": "" if entry_type == "folder" else str(item.get("fileId", item.get("fileID", ""))),
                 "size": int(item.get("size", 0) or 0),
                 "parent_id": cid or "0",
             })
@@ -113,11 +118,17 @@ class Pan123Provider(CloudProvider):
         entries = []
         items = data.get("data", {}).get("infoList", [])
         for item in items:
+            entry_type = "folder" if int(item.get("type", 0) or 0) == 1 else "file"
+            item_id = str(item.get("fileId", item.get("fileID", "")))
             entries.append({
                 "id": str(item.get("fileId", item.get("fileID", ""))),
                 "name": str(item.get("fileName", "")),
-                "type": "folder" if int(item.get("type", 0) or 0) == 1 else "file",
+                "type": entry_type,
+                "is_dir": entry_type == "folder",
+                "cid": item_id if entry_type == "folder" else "",
+                "fid": "" if entry_type == "folder" else item_id,
                 "size": int(item.get("size", 0) or 0),
+                "parent_id": cid or "0",
                 "share_id": share_code,
             })
         return {"entries": entries, "total": len(entries), "share": share_payload}

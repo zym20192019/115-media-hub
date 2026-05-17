@@ -39,6 +39,75 @@ def _build_retry_resource_from_job(job: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _get_share_receive_provider_by_link_type(link_type: str):
+    try:
+        from ..providers.registry import get_by_link_type as _registry_get_by_link_type
+
+        provider = _registry_get_by_link_type(link_type)
+        if provider and provider.supports_share_receive:
+            return provider
+    except Exception:
+        return None
+    return None
+
+
+def _build_resource_job_selected_entries(selection: Dict[str, Any]) -> List[Dict[str, Any]]:
+    normalized = normalize_share_selection_meta(selection or {})
+    entries = normalized.get("selected_entries", []) if isinstance(normalized.get("selected_entries"), list) else []
+    if entries:
+        return [entry for entry in entries if isinstance(entry, dict)]
+    selected_ids = normalized.get("selected_ids", []) if isinstance(normalized.get("selected_ids"), list) else []
+    return [{"id": str(entry_id).strip()} for entry_id in selected_ids if str(entry_id or "").strip()]
+
+
+def _submit_provider_share_receive_job(
+    provider: Any,
+    cookie: str,
+    link_url: str,
+    raw_text: str,
+    folder_id: str,
+    receive_code: str,
+    selection: Dict[str, Any],
+) -> Dict[str, Any]:
+    selected_entries = _build_resource_job_selected_entries(selection)
+    selected_ids = [
+        str(entry.get("id", "")).strip()
+        for entry in selected_entries
+        if isinstance(entry, dict) and str(entry.get("id", "")).strip()
+    ]
+    share_payload = provider.resolve_share_payload(cookie, link_url, raw_text, receive_code)
+    receive_payload = provider.prepare_share_receive(cookie, share_payload, folder_id)
+    receive_payload["url"] = str(share_payload.get("url", "") or link_url).strip()
+    receive_payload["raw_text"] = raw_text
+    receive_payload["receive_code"] = str(share_payload.get("receive_code", "") or receive_code).strip()
+    receive_payload["target_cid"] = folder_id
+    receive_payload["selected_ids"] = selected_ids
+    receive_payload["selected_entries"] = selected_entries
+
+    if not selected_entries:
+        snapshot = provider.list_share_entries(cookie, share_payload, "0", 0, 200)
+        snapshot_entries = snapshot.get("entries", []) if isinstance(snapshot.get("entries"), list) else []
+        selected_entries = [entry for entry in snapshot_entries if isinstance(entry, dict)]
+        selected_ids = [
+            str(entry.get("id", "")).strip()
+            for entry in selected_entries
+            if str(entry.get("id", "")).strip()
+        ]
+        receive_payload["selected_ids"] = selected_ids
+        receive_payload["selected_entries"] = selected_entries
+        if selected_ids:
+            receive_payload["selection"] = merge_share_selection_meta(
+                receive_payload.get("selection", {}),
+                {
+                    "selected_ids": selected_ids,
+                    "selected_entries": selected_entries,
+                    "share_root_title": str(snapshot.get("share_title", "") or "").strip(),
+                },
+            )
+
+    return provider.submit_share_receive(cookie, receive_payload, selected_entries)
+
+
 async def cancel_resource_job(job_id: int, reason: str = "manual") -> Dict[str, Any]:
     job = get_resource_job(job_id, include_private=True)
     if not job:
@@ -96,7 +165,7 @@ async def retry_resource_job(job_id: int, reason: str = "manual") -> Dict[str, A
         payload.pop("extra", None)
     if not payload["savepath"]:
         raise RuntimeError("原任务保存路径为空，无法重试")
-    if link_type in ("115share", "quark"):
+    if _get_share_receive_provider_by_link_type(link_type):
         payload["share_selection"] = normalize_share_selection_meta(job_extra)
         snapshot = job.get("_snapshot", {}) if isinstance(job.get("_snapshot"), dict) else {}
         receive_code = normalize_receive_code(
@@ -208,18 +277,26 @@ async def run_resource_job(job_id: int) -> None:
         ensure_not_cancelled("启动前")
 
         link_type = resolve_resource_link_type(job.get("link_type", ""), job.get("link_url", ""))
-        if link_type not in ("magnet", "115share", "quark"):
-            raise RuntimeError("当前仅支持 magnet 下载、115 分享转存和夸克分享转存")
+        share_provider = _get_share_receive_provider_by_link_type(link_type)
+        is_share_receive_link = bool(share_provider)
+        if link_type != "magnet" and not is_share_receive_link:
+            raise RuntimeError("当前仅支持 magnet 下载和已启用网盘的分享转存")
         cfg = get_config()
         cookie_115 = str(cfg.get("cookie_115", "")).strip()
-        cookie_quark = str(cfg.get("cookie_quark", "")).strip()
-        if link_type in ("magnet", "115share"):
+        provider_cookie = cookie_115
+        provider_label = "115"
+        if is_share_receive_link:
+            provider_label = str(getattr(share_provider, "label", "") or share_provider.name).strip()
+            enabled_map = cfg.get("provider_enabled", {}) if isinstance(cfg.get("provider_enabled", {}), dict) else {}
+            if not bool(enabled_map.get(share_provider.name, share_provider.name in ("115", "quark"))):
+                raise RuntimeError(f"{provider_label} 未启用")
+            provider_cookie = share_provider.get_cookie(cfg)
+        if link_type == "magnet":
             if not cookie_115:
                 raise RuntimeError("请先在参数配置中填写 115 Cookie")
-        elif not cookie_quark:
-            raise RuntimeError("请先在参数配置中填写 Quark Cookie")
+        elif not provider_cookie:
+            raise RuntimeError(f"请先在参数配置中填写 {provider_label} 认证信息")
 
-        provider_label = "夸克" if link_type == "quark" else "115"
         folder_id = str(job.get("folder_id", "") or "").strip()
         if not folder_id or folder_id == "0":
             update_resource_job(
@@ -229,11 +306,11 @@ async def run_resource_job(job_id: int) -> None:
                 started_at=now_text(),
             )
             try:
-                if link_type == "quark":
+                if link_type == "magnet":
                     folder_id = await asyncio.wait_for(
                         asyncio.to_thread(
-                            resolve_quark_folder_id_by_path,
-                            cookie_quark,
+                            resolve_115_folder_id_by_path,
+                            cookie_115,
                             str(job.get("savepath", "") or "").strip(),
                         ),
                         timeout=min(import_timeout_seconds, 60),
@@ -241,8 +318,8 @@ async def run_resource_job(job_id: int) -> None:
                 else:
                     folder_id = await asyncio.wait_for(
                         asyncio.to_thread(
-                            resolve_115_folder_id_by_path,
-                            cookie_115,
+                            share_provider.resolve_folder_id_by_path,
+                            provider_cookie,
                             str(job.get("savepath", "") or "").strip(),
                         ),
                         timeout=min(import_timeout_seconds, 60),
@@ -284,31 +361,40 @@ async def run_resource_job(job_id: int) -> None:
             detail = str(response.get("error_msg", "")).strip() or "115 已接收离线任务"
             if int(response.get("errcode", 0) or 0) == 10008:
                 detail = "115 提示任务已存在，已继续走刷新流程"
-        elif link_type == "115share":
+        else:
             job_extra = safe_json_loads(job.get("extra_json"), {})
             job_selection = normalize_share_selection_meta(job_extra)
+            receive_code = normalize_receive_code(
+                str(job_snapshot.get("receive_code", "") or job_extra.get("receive_code", "")).strip()
+            )
             share_url = apply_share_receive_code_to_url(
                 str(job.get("link_url", "")).strip(),
-                str(job_snapshot.get("receive_code", "") or "").strip(),
+                receive_code,
             )
             try:
                 response_bundle = await asyncio.wait_for(
                     asyncio.to_thread(
-                        submit_115_share_receive,
-                        cookie_115,
+                        _submit_provider_share_receive_job,
+                        share_provider,
+                        provider_cookie,
                         share_url,
+                        str((resource or {}).get("raw_text", "") or ""),
                         str(job.get("folder_id", "")).strip(),
-                        "",
-                        job_selection.get("selected_ids", []),
-                        str(job_snapshot.get("receive_code", "") or "").strip(),
+                        receive_code,
+                        job_selection,
                     ),
                     timeout=import_timeout_seconds,
                 )
             except asyncio.TimeoutError as exc:
-                raise RuntimeError(f"提交到 115 超时（>{import_timeout_seconds} 秒）") from exc
-            response = response_bundle.get("response", {}) if isinstance(response_bundle, dict) else {}
+                raise RuntimeError(f"提交到 {provider_label} 超时（>{import_timeout_seconds} 秒）") from exc
+            response = response_bundle.get("response", response_bundle) if isinstance(response_bundle, dict) else {}
             resolved_selection = merge_share_selection_meta(job_selection, response_bundle.get("selection", {}))
-            detail = str(response.get("error", "")).strip() or str(response.get("msg", "")).strip() or "115 已接收转存任务"
+            detail = (
+                str(response.get("error", "")).strip()
+                or str(response.get("message", "")).strip()
+                or str(response.get("msg", "")).strip()
+                or f"{provider_label} 已接收转存任务"
+            )
             if bool(response_bundle.get("duplicate_receive", False)):
                 detail = f"{detail}（已按幂等结果处理）"
 
@@ -322,55 +408,10 @@ async def run_resource_job(job_id: int) -> None:
                 if job_snapshot:
                     merged_extra["snapshot"] = job_snapshot
                 job["extra_json"] = safe_json_dumps(merged_extra)
-        else:
-            job_extra = safe_json_loads(job.get("extra_json"), {})
-            job_selection = normalize_share_selection_meta(job_extra)
-            selected_ids = (
-                job_selection.get("selected_ids", [])
-                if isinstance(job_selection.get("selected_ids"), list)
-                else []
-            )
-            receive_code = normalize_receive_code(
-                str(job_snapshot.get("receive_code", "") or job_extra.get("receive_code", "")).strip()
-            )
-            try:
-                response_bundle = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        submit_quark_share_save,
-                        cookie_quark,
-                        str(job.get("link_url", "")).strip(),
-                        str(job.get("folder_id", "")).strip(),
-                        str((resource or {}).get("raw_text", "") or ""),
-                        selected_ids,
-                        receive_code,
-                        job_selection.get("selected_entries", []),
-                    ),
-                    timeout=import_timeout_seconds,
-                )
-            except asyncio.TimeoutError as exc:
-                raise RuntimeError(f"提交到夸克超时（>{import_timeout_seconds} 秒）") from exc
-            response = response_bundle.get("response", {}) if isinstance(response_bundle, dict) else {}
-            resolved_selection = merge_share_selection_meta(job_selection, response_bundle.get("selection", {}))
-            detail = (
-                str(response.get("message", "")).strip()
-                or str(response.get("msg", "")).strip()
-                or "夸克已接收转存任务"
-            )
-
-            resource_title_rel = normalize_relative_path(job.get("title", "") or resource.get("title", ""))
-            current_sharetitle = normalize_relative_path(job.get("sharetitle", ""))
-            auto_sharetitle = normalize_relative_path(resolved_selection.get("auto_sharetitle", ""))
-            if auto_sharetitle and (not current_sharetitle or current_sharetitle == resource_title_rel):
-                job["sharetitle"] = auto_sharetitle
-            if resolved_selection:
-                merged_extra = merge_json_object(job_extra, resolved_selection)
-                if job_snapshot:
-                    merged_extra["snapshot"] = job_snapshot
-                job["extra_json"] = safe_json_dumps(merged_extra)
         ensure_not_cancelled("提交后")
 
-        if link_type == "quark":
-            detail = f"{detail}；夸克链路不联动文件夹监控，导入成功后不会自动刷新"
+        if is_share_receive_link and not bool(getattr(share_provider, "supports_monitor", False)):
+            detail = f"{detail}；{provider_label} 链路不联动文件夹监控，导入成功后不会自动刷新"
             next_status = "completed"
         else:
             monitor_task_name = str(job.get("monitor_task_name", "") or "").strip()
@@ -398,7 +439,7 @@ async def run_resource_job(job_id: int) -> None:
         }
         if next_status == "completed":
             update_fields["finished_at"] = now_text()
-        if link_type in ("115share", "quark"):
+        if is_share_receive_link:
             update_fields["extra_json"] = job.get("extra_json", safe_json_dumps({}))
             if str(job.get("sharetitle", "")).strip():
                 update_fields["sharetitle"] = str(job.get("sharetitle", "")).strip()
@@ -411,7 +452,7 @@ async def run_resource_job(job_id: int) -> None:
             conn.close()
 
         if (
-            link_type != "quark"
+            (not is_share_receive_link or bool(getattr(share_provider, "supports_monitor", False)))
             and bool(job.get("auto_refresh"))
             and str(job.get("monitor_task_name", "")).strip()
         ):

@@ -95,7 +95,7 @@
                     </div>
                     <div id="subscription-115-fixed-link-block" class="space-y-3">
                         <div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 space-y-3">
-                            <div class="text-xs text-slate-500">固定 115 分享链接（可选）</div>
+                            <div id="subscription-fixed-link-title" class="text-xs text-slate-500">固定分享链接（可选）</div>
                             <div class="resource-save-path-grid">
                                 <input id="subscription_share_link_url" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm" placeholder="例如：https://115.com/s/xxxxxxx?password=abcd">
                                 <button type="button" onclick="openSubscriptionShareFolderModal()" class="px-4 py-3 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-bold whitespace-nowrap">浏览链接目录</button>
@@ -104,7 +104,7 @@
                                 <input id="subscription_share_receive_code" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm font-mono uppercase tracking-[0.08em]" placeholder="可选：提取码（1-16 位字母数字）">
                                 <button type="button" onclick="openSubscriptionShareFolderModal(true)" class="px-4 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold whitespace-nowrap">应用并浏览</button>
                             </div>
-                            <div class="text-[11px] text-slate-500 leading-5">资源搜索会优先执行（TG 频道搜索，及启用时的 PanSou 搜索）；下方开关开启后，这个固定 115 分享链接会作为备选候选排在资源搜索候选之后。</div>
+                            <div id="subscription-fixed-link-hint" class="text-[11px] text-slate-500 leading-5">资源搜索会优先执行（TG 频道搜索，及启用时的 PanSou 搜索）；下方开关开启后，这个固定分享链接会作为备选候选排在资源搜索候选之后。</div>
                             <label class="flex items-center gap-3 cursor-pointer text-sm">
                                 <input type="checkbox" id="subscription_fixed_link_channel_search" class="ui-checkbox">
                                 启用固定分享链接兜底
@@ -112,14 +112,14 @@
                             <div class="text-[11px] text-slate-500 leading-5">开启后会先做资源搜索，再把固定链接追加为兜底候选；关闭时即使填写固定链接，也只按资源搜索执行。</div>
                         </div>
                         <label class="block">
-                            <span class="text-xs text-slate-500">115 分享子目录（可选）</span>
+                            <span id="subscription-share-subdir-label" class="text-xs text-slate-500">分享子目录（可选）</span>
                             <input id="subscription_share_subdir" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-1" placeholder="例如：合集/剧名（留空表示从分享根目录）">
                             <input id="subscription_share_subdir_cid" type="hidden" value="">
                             <div class="text-[11px] text-slate-500 mt-2">可手动填写，也可先填上方固定分享链接后点击“浏览链接目录”选择。浏览选择时会自动记录 CID 锚点，优先按 CID 定位目录；配置后仅在该子目录内扫描和转存。</div>
                         </label>
                     </div>
                     <div id="subscription-quark-provider-hint" class="hidden text-[11px] text-cyan-300/90 leading-5 rounded-xl border border-cyan-400/20 bg-cyan-500/10 px-3 py-2">
-                        Quark 模式使用资源搜索自动匹配，不支持固定分享链接兜底；也可以手动扫描单个分享链接。
+                        当前网盘使用资源搜索自动匹配；也可以手动扫描单个分享链接。
                     </div>
                     <div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 space-y-3">
                         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -144,7 +144,7 @@
                                 <input id="subscription_share_scan_rate_limit_seconds" type="number" min="0.05" max="5" step="0.05" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-1" value="1">
                             </label>
                         </div>
-                        <div id="subscription-scan-tuning-hint" class="text-[11px] text-slate-500 leading-5">115 建议：候选上限 3，候选并发 1，目录并发 1，请求间隔 1s。</div>
+                        <div id="subscription-scan-tuning-hint" class="text-[11px] text-slate-500 leading-5">建议：候选上限 3，候选并发 1，目录并发 1，请求间隔 1s。</div>
                     </div>
                     <div class="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 space-y-3">
                         <div class="text-xs text-slate-500">自动查询时段</div>
@@ -219,7 +219,7 @@
                         启用任务（关闭后不参与定时，但仍可手动运行）
                     </label>
                     <div id="subscription-provider-strategy-hint" class="text-xs text-slate-500 leading-6">
-                        匹配策略：默认先执行资源搜索（TG 频道搜索，及启用时的 PanSou 搜索）；可开启固定 115 分享链接兜底，把固定链接候选排在资源搜索候选之后。
+                        匹配策略：默认先执行资源搜索（TG 频道搜索，及启用时的 PanSou 搜索）；可开启固定分享链接兜底，把固定链接候选排在资源搜索候选之后。
                     </div>
                 </div>
                 <div class="subscription-modal-actions-inline subscription-modal-footer-shell grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">

@@ -35,8 +35,12 @@ def _format_elapsed_seconds(seconds: float) -> str:
 
 
 def _subscription_supported_link_types(provider: str) -> Set[str]:
-    if normalize_subscription_provider(provider, fallback="115") == "quark":
-        return {"quark"}
+    normalized_provider = normalize_subscription_provider(provider, fallback="115")
+    from ..providers.registry import get_or_none as _registry_get_provider_or_none
+
+    p = _registry_get_provider_or_none(normalized_provider)
+    if p and p.supports_subscription and p.link_type:
+        return {p.link_type}
     return {"115share"}
 
 

@@ -15,8 +15,9 @@ class TianyiProvider(CloudProvider):
     link_type = "tianyi"
     auth_type = "oauth2"
     config_keys = ["cookie_tianyi"]
+    supports_subscription = True
     supports_offline = False
-    supports_fixed_share_link = False
+    supports_fixed_share_link = True
 
     def __init__(self):
         super().__init__()
@@ -78,10 +79,15 @@ class TianyiProvider(CloudProvider):
         data = resp.json()
         entries = []
         for item in data.get("data", {}).get("items", []):
+            is_dir = bool(item.get("isFolder"))
+            item_id = str(item.get("fileId", ""))
             entries.append({
                 "id": str(item.get("fileId", "")),
                 "name": str(item.get("fileName", "")),
                 "type": "folder" if item.get("isFolder") else "file",
+                "is_dir": is_dir,
+                "cid": item_id if is_dir else "",
+                "fid": "" if is_dir else item_id,
                 "size": int(item.get("fileSize", 0) or 0),
                 "parent_id": cid or "0",
             })
@@ -164,11 +170,17 @@ class TianyiProvider(CloudProvider):
         data = resp.json()
         entries = []
         for item in data.get("data", {}).get("items", []):
+            is_dir = bool(item.get("isFolder"))
+            item_id = str(item.get("fileId", ""))
             entries.append({
                 "id": str(item.get("fileId", "")),
                 "name": str(item.get("fileName", "")),
                 "type": "folder" if item.get("isFolder") else "file",
+                "is_dir": is_dir,
+                "cid": item_id if is_dir else "",
+                "fid": "" if is_dir else item_id,
                 "size": int(item.get("fileSize", 0) or 0),
+                "parent_id": cid or "0",
                 "share_id": share_code,
             })
         return {

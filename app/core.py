@@ -792,7 +792,7 @@ def default_config() -> Dict[str, Any]:
         "api_115_download_url_cache_ttl_seconds": API_115_DOWNLOAD_URL_CACHE_TTL_SECONDS,
         "cookie_115": "",
         "cookie_quark": "",
-        "provider_enabled": {"115": True, "quark": True},
+        "provider_enabled": _build_provider_enabled_defaults(),
         "sign115_enabled": False,
         "sign115_cron_time": "09:00",
         "tg_proxy_enabled": False,
@@ -899,11 +899,22 @@ def normalize_subscription_quality_priority(value: Any) -> str:
     return normalized
 
 
+def _build_provider_enabled_defaults() -> Dict[str, bool]:
+    try:
+        from .providers.registry import list_all as _list_all_p
+        result = {}
+        for p in _list_all_p():
+            result[p.name] = p.name in ("115", "quark")
+        return result
+    except Exception:
+        return {"115": True, "quark": True}
+
+
 def normalize_provider_enabled_config(cfg: Dict[str, Any]) -> Dict[str, bool]:
     enabled = cfg.get("provider_enabled")
     if not isinstance(enabled, dict):
         enabled = {}
-    defaults = {"115": True, "quark": True}
+    defaults = _build_provider_enabled_defaults()
     result = {}
     for name in defaults:
         result[name] = bool(enabled.get(name, defaults[name]))
@@ -1637,10 +1648,10 @@ def normalize_subscription_task(task: Dict[str, Any]) -> Dict[str, Any]:
         or ""
     ).strip()
     share_link_type = resolve_resource_link_type("", share_link_url)
-    # Check capability instead of hardcoding provider name
     _p = _get_provider_or_none(provider)
-    _supports_fixed = _p.supports_fixed_share_link if _p else False
-    use_115_fixed_link = _supports_fixed and share_link_type == "115share"
+    _supports_fixed = bool(_p and _p.supports_fixed_share_link)
+    _provider_link_type = str(getattr(_p, "link_type", "") or "").strip().lower() if _p else ""
+    use_fixed_share_link = _supports_fixed and bool(_provider_link_type) and share_link_type == _provider_link_type
     if not _supports_fixed:
         share_link_url = ""
     share_link_receive_code = normalize_receive_code(
@@ -1668,7 +1679,7 @@ def normalize_subscription_task(task: Dict[str, Any]) -> Dict[str, Any]:
         ),
         default=False,
     )
-    if not _supports_fixed:
+    if not use_fixed_share_link:
         share_link_receive_code = ""
         share_subdir = ""
         share_subdir_cid = ""
@@ -1687,11 +1698,11 @@ def normalize_subscription_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "season": max(1, season),
         "total_episodes": max(0, total_episodes),
         "savepath": savepath,
-        "share_link_url": share_link_url if use_115_fixed_link else "",
-        "share_link_receive_code": share_link_receive_code if use_115_fixed_link else "",
+        "share_link_url": share_link_url if use_fixed_share_link else "",
+        "share_link_receive_code": share_link_receive_code if use_fixed_share_link else "",
         "share_subdir": share_subdir,
         "share_subdir_cid": share_subdir_cid,
-        "fixed_link_channel_search": fixed_link_channel_search if use_115_fixed_link else False,
+        "fixed_link_channel_search": fixed_link_channel_search if use_fixed_share_link else False,
         "enabled": normalize_bool(task.get("enabled", True), default=True),
         # 兼容旧前端字段：cron_minutes 保留为“时段内查询间隔”镜像值。
         "cron_minutes": schedule_interval_minutes,
@@ -1864,8 +1875,12 @@ def normalize_resource_favorite_dir(item: Dict[str, Any]) -> Dict[str, str]:
 
 def normalize_resource_favorite_dirs(value: Any) -> Dict[str, List[Dict[str, str]]]:
     source = value if isinstance(value, dict) else {}
-    result: Dict[str, List[Dict[str, str]]] = {"115": [], "quark": []}
-    for provider in ("115", "quark"):
+    try:
+        provider_names = [p.name for p in list_all() if p.supports_folder_browse]
+    except Exception:
+        provider_names = ["115", "quark"]
+    result: Dict[str, List[Dict[str, str]]] = {provider: [] for provider in provider_names}
+    for provider in provider_names:
         raw_items = source.get(provider, [])
         if not isinstance(raw_items, list):
             raw_items = []
@@ -2052,7 +2067,7 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if "cookie_quark" not in merged:
         merged["cookie_quark"] = ""
     if "provider_enabled" not in merged:
-        merged["provider_enabled"] = {"115": True, "quark": True}
+        merged["provider_enabled"] = _build_provider_enabled_defaults()
     if "sign115_enabled" not in merged:
         merged["sign115_enabled"] = False
     if "sign115_cron_time" not in merged:
@@ -2671,13 +2686,12 @@ def resource_item_matches_provider_filter(item: Dict[str, Any], provider_filter:
         return True
     payload = item if isinstance(item, dict) else {}
     link_type = resolve_resource_link_type(payload.get("link_type", ""), payload.get("link_url", ""))
-    if normalized_filter == "115":
-        return link_type == "115share"
     if normalized_filter == "magnet":
         return link_type == "magnet"
-    if normalized_filter == "quark":
-        return link_type == "quark"
-    return True
+    p = _get_provider_or_none(normalized_filter)
+    if p:
+        return link_type == p.link_type
+    return False
 
 
 def filter_resource_items_by_provider(
@@ -3418,11 +3432,16 @@ def validate_strm_play_runtime_config(cfg: Dict[str, Any]) -> Optional[str]:
 
 def validate_subscription_runtime_config(cfg: Dict[str, Any], task: Dict[str, Any]) -> Optional[str]:
     provider = normalize_subscription_provider(task.get("provider", "115"), fallback="115")
-    if provider == "quark":
-        if not str(cfg.get("cookie_quark", "")).strip():
-            return "请先在参数配置中填写 Quark Cookie"
-    elif not str(cfg.get("cookie_115", "")).strip():
-        return "请先在参数配置中填写 115 Cookie"
+    p = _get_provider_or_none(provider)
+    if not p:
+        return "订阅网盘类型不支持"
+    enabled_map = cfg.get("provider_enabled", {}) if isinstance(cfg.get("provider_enabled", {}), dict) else {}
+    if not bool(enabled_map.get(provider, provider in ("115", "quark"))):
+        return f"{p.label} 未启用，请先在参数配置中启用该网盘"
+    if not bool(getattr(p, "supports_subscription", False)):
+        return f"{p.label} 暂不支持订阅"
+    if not p.get_cookie(cfg):
+        return f"请先在参数配置中填写 {p.label} 认证信息"
     if not str(task.get("name", "")).strip():
         return "任务名未填写"
     if not str(task.get("title", "")).strip():
@@ -3432,8 +3451,6 @@ def validate_subscription_runtime_config(cfg: Dict[str, Any], task: Dict[str, An
     media_type = str(task.get("media_type", "movie") or "movie").strip().lower()
     if media_type not in ("movie", "tv"):
         return "订阅类型不支持"
-    if provider not in ("115", "quark"):
-        return "订阅网盘类型不支持"
     return None
 
 
@@ -3736,6 +3753,12 @@ def normalize_cookie_health_provider(value: Any) -> str:
         return "115"
     if token in {"quark", "cookie_quark"}:
         return "quark"
+    try:
+        p = _get_provider_or_none(token)
+        if p:
+            return p.name
+    except Exception:
+        pass
     return ""
 
 
@@ -3745,11 +3768,25 @@ def is_cookie_health_share_trigger(trigger: Any) -> bool:
 
 
 def _cookie_health_provider_label(provider: str) -> str:
-    return "Quark" if normalize_cookie_health_provider(provider) == "quark" else "115"
+    provider_key = normalize_cookie_health_provider(provider)
+    try:
+        p = _get_provider_or_none(provider_key)
+        if p:
+            return str(p.label or provider_key)
+    except Exception:
+        pass
+    return "Quark" if provider_key == "quark" else ("115" if provider_key == "115" else provider_key)
 
 
 def _cookie_health_cookie_value(cfg: Dict[str, Any], provider: str) -> str:
-    key = "cookie_quark" if normalize_cookie_health_provider(provider) == "quark" else "cookie_115"
+    provider_key = normalize_cookie_health_provider(provider)
+    try:
+        p = _get_provider_or_none(provider_key)
+        if p:
+            return p.get_cookie(cfg or {})
+    except Exception:
+        pass
+    key = "cookie_quark" if provider_key == "quark" else "cookie_115"
     return str((cfg or {}).get(key, "") or "").strip()
 
 
@@ -4157,7 +4194,12 @@ async def refresh_cookie_health_status(
 
         mark_cookie_health_checking(provider, trigger=trigger)
         try:
-            if provider == "quark":
+            p = _get_provider_or_none(provider)
+            if p:
+                ok = await asyncio.to_thread(p.probe_connectivity, cookie_value)
+                if not ok:
+                    raise RuntimeError(f"{p.label} 连接检测失败")
+            elif provider == "quark":
                 await asyncio.to_thread(_probe_quark_cookie, cookie_value)
             else:
                 await asyncio.to_thread(_probe_115_cookie, cookie_value)
@@ -5330,6 +5372,19 @@ def _build_resource_state_payload_snapshot(
     failed_job_count = int(stats_payload.get("failed_job_count", 0) or 0)
     sources = cfg.get("resource_sources", [])
     enabled_sources = [source for source in sources if source.get("enabled")]
+    provider_auth_configured: Dict[str, bool] = {}
+    try:
+        for p in list_all():
+            provider_auth_configured[p.name] = bool(p.get_cookie(cfg))
+    except Exception:
+        provider_auth_configured = {
+            "115": bool(str(cfg.get("cookie_115", "")).strip()),
+            "quark": bool(str(cfg.get("cookie_quark", "")).strip()),
+        }
+    provider_cookie_flags = {
+        f"cookie_configured_{provider_name}": bool(configured)
+        for provider_name, configured in provider_auth_configured.items()
+    }
     if compact and not keyword:
         return {
             "jobs": clone_jsonable(jobs),
@@ -5356,6 +5411,8 @@ def _build_resource_state_payload_snapshot(
                 "has_resource_data": total_item_count > 0,
                 "has_jobs": total_job_count > 0,
             },
+            "provider_auth": clone_jsonable(provider_auth_configured),
+            **provider_cookie_flags,
             "cookie_health": build_cookie_health_payload(cfg),
         }
     tg_channel_sync_limit = get_tg_channel_sync_limit(cfg)
@@ -5388,6 +5445,8 @@ def _build_resource_state_payload_snapshot(
         "monitor_tasks": clone_jsonable(cfg.get("monitor_tasks", [])),
         "cookie_configured": bool(str(cfg.get("cookie_115", "")).strip()),
         "quark_cookie_configured": bool(str(cfg.get("cookie_quark", "")).strip()),
+        "provider_auth": clone_jsonable(provider_auth_configured),
+        **provider_cookie_flags,
         "cookie_health": build_cookie_health_payload(cfg),
         "setup_status": {
             "strm_ready": bool(
@@ -6007,7 +6066,8 @@ def format_subscription_media_type_label(media_type: Any) -> str:
 
 def format_subscription_provider_label(provider: Any) -> str:
     normalized = normalize_subscription_provider(provider, fallback="115")
-    return "夸克" if normalized == "quark" else "115"
+    p = _get_provider_or_none(normalized)
+    return str(getattr(p, "label", "") or normalized).strip() if p else normalized
 
 
 def format_resource_link_type_label(link_type: Any, link_url: Any = "") -> str:

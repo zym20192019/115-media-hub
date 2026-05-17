@@ -330,8 +330,8 @@
             const receiveInput = document.getElementById('subscription_share_receive_code');
             const linkUrl = String(linkInput?.value || '').trim();
             const linkType = detectResourceLinkTypeByUrl(linkUrl);
-            if (!linkUrl) throw new Error('请先填写固定 115 分享链接');
-            if (linkType !== '115share') throw new Error('仅支持 115 分享链接');
+            if (!linkUrl) throw new Error('请先填写固定分享链接');
+            if (linkType !== _subP.link_type) throw new Error(`仅支持当前 ${_subP.label} 分享链接`);
             const rawReceiveCode = String(receiveInput?.value || '').trim();
             let receiveCode = normalizeReceiveCodeInput(rawReceiveCode);
             if (rawReceiveCode && !receiveCode) throw new Error('提取码格式不正确，请输入 1-16 位字母或数字');
@@ -339,6 +339,7 @@
             if (receiveInput) receiveInput.value = receiveCode;
             if (linkInput) linkInput.value = linkUrl;
             return {
+                provider: _subP.name,
                 link_url: linkUrl,
                 raw_text: linkUrl,
                 receive_code: receiveCode,
@@ -375,7 +376,7 @@
                 });
             }
             const requestPromise = (async () => {
-                const data = await fetchResourceBrowserJson('/resource/115/share_entries_preview', {
+                const data = await fetchResourceBrowserJson(`/resource/browse/${encodeURIComponent(payload.provider)}/share_entries_preview`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
@@ -599,7 +600,7 @@
             try {
                 payload = getSubscriptionShareLinkPayload();
             } catch (e) {
-                showToast(e?.message || '请先填写固定 115 分享链接', { tone: 'warn', duration: 2800, placement: 'top-center' });
+                showToast(e?.message || '请先填写固定分享链接', { tone: 'warn', duration: 2800, placement: 'top-center' });
                 return;
             }
             const fingerprint = `${payload.link_url}#${payload.receive_code || ''}`;

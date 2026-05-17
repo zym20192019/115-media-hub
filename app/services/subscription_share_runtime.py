@@ -361,7 +361,9 @@ async def _fetch_subscription_share_entries(
         if isinstance(cached_payload, dict) and cached_payload:
             return cached_payload
 
-    settings = get_subscription_share_scan_runtime_settings(provider="quark" if link_type == "quark" else "115")
+    share_provider = get_by_link_type(link_type)
+    provider_name = share_provider.name if share_provider else ("quark" if link_type == "quark" else "115")
+    settings = get_subscription_share_scan_runtime_settings(provider=provider_name)
     request_timeout_seconds = max(6, min(30, int(SUBSCRIPTION_SHARE_SCAN_REQUEST_TIMEOUT_SECONDS or 12)))
     share_rate_limit_seconds = float(settings.get("share_scan_rate_limit_seconds", SUBSCRIPTION_SHARE_SCAN_RATE_LIMIT_SECONDS) or SUBSCRIPTION_SHARE_SCAN_RATE_LIMIT_SECONDS)
     page_limit = 200 if link_type == "quark" else 400
@@ -389,7 +391,7 @@ async def _fetch_subscription_share_entries(
             max_pages,
             folders_only,
         )
-    else:
+    elif link_type == "115share":
         result = await asyncio.to_thread(
             list_115_share_entries,
             cookie,
@@ -406,6 +408,50 @@ async def _fetch_subscription_share_entries(
             max_pages,
             folders_only,
         )
+    elif share_provider and share_provider.supports_share_receive:
+        await _throttle_subscription_share_fetch(provider_name, share_rate_limit_seconds)
+
+        def _load_generic_share_entries() -> Dict[str, Any]:
+            share_payload = share_provider.resolve_share_payload(
+                cookie,
+                normalized_share_url,
+                raw_text,
+                normalized_receive_code,
+            )
+            payload = share_provider.list_share_entries(
+                cookie,
+                share_payload,
+                normalized_cid,
+                0,
+                page_limit,
+            )
+            entries = payload.get("entries", []) if isinstance(payload.get("entries"), list) else []
+            if folders_only:
+                entries = [entry for entry in entries if bool(entry.get("is_dir"))]
+            folder_count = sum(1 for entry in entries if bool(entry.get("is_dir")))
+            return {
+                **(payload if isinstance(payload, dict) else {}),
+                "entries": entries,
+                "summary": {
+                    "folder_count": folder_count,
+                    "file_count": max(0, len(entries) - folder_count),
+                },
+                "share_code": str(
+                    share_payload.get("share_code", "")
+                    or share_payload.get("pwd_id", "")
+                    or share_payload.get("share_id", "")
+                    or ""
+                ).strip(),
+                "receive_code": str(share_payload.get("receive_code", "") or "").strip(),
+                "count": int((payload if isinstance(payload, dict) else {}).get("total", len(entries)) or len(entries)),
+                "offset": 0,
+                "next_offset": len(entries),
+                "has_more": False,
+            }
+
+        result = await asyncio.to_thread(_load_generic_share_entries)
+    else:
+        raise RuntimeError("当前分享链接类型不支持订阅目录扫描")
     if isinstance(runtime_cache, dict):
         runtime_cache[runtime_key] = result
     if refresh_pending and isinstance(refreshed_keys, set) and not bool(result.get("cache_stale", False)):

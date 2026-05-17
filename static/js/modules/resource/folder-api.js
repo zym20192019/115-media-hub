@@ -17,7 +17,10 @@
         }
 
         function normalizeResourceProviderCacheKey(provider = '115') {
-            return normalizeSubscriptionProvider(provider, '115') === 'quark' ? 'quark' : '115';
+            if (typeof window.normalizeResourceProviderName === 'function') {
+                return window.normalizeResourceProviderName(provider, '115');
+            }
+            return String(provider || '115').trim().toLowerCase() || '115';
         }
 
         function buildResourceFolderBranchCacheKey(cid = '0', { provider = '115', foldersOnly = false } = {}) {

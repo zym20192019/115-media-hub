@@ -16,6 +16,7 @@ class CloudProvider(ABC):
     # === 能力声明 ===
     supports_folder_browse: bool = True
     supports_share_receive: bool = True
+    supports_subscription: bool = False
     supports_offline: bool = False
     supports_fixed_share_link: bool = False
     supports_strm: bool = False

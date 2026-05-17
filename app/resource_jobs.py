@@ -441,9 +441,16 @@ def create_resource_job(resource: Dict[str, Any], data: Dict[str, Any]) -> int:
     cursor = conn.cursor()
     now = now_text()
     link_type = resolve_resource_link_type(resource.get("link_type", "unknown"), resource.get("link_url", ""))
+    try:
+        from .providers.registry import get_by_link_type as _registry_get_by_link_type
+
+        share_provider = _registry_get_by_link_type(link_type)
+    except Exception:
+        share_provider = None
+    is_share_receive_link = bool(share_provider and share_provider.supports_share_receive)
     folder_id = str(data.get("folder_id", "")).strip()
     savepath = normalize_relative_path(data.get("savepath", ""))
-    extra = normalize_share_selection_meta(data.get("share_selection", {})) if link_type in ("115share", "quark") else {}
+    extra = normalize_share_selection_meta(data.get("share_selection", {})) if is_share_receive_link else {}
     custom_extra = data.get("extra", {})
     if isinstance(custom_extra, dict):
         extra = merge_json_object(extra, custom_extra)
@@ -454,25 +461,27 @@ def create_resource_job(resource: Dict[str, Any], data: Dict[str, Any]) -> int:
         # 默认归类为手动导入。自动化来源（订阅、Webhook 等）应在调用侧显式覆盖。
         extra["job_source"] = "manual_import"
     manual_receive_code = normalize_receive_code(data.get("receive_code", ""))
-    if link_type in ("115share", "quark") and manual_receive_code:
+    if is_share_receive_link and manual_receive_code:
         extra["receive_code"] = manual_receive_code
     extra["snapshot"] = build_resource_job_snapshot(resource, link_type, manual_receive_code)
     manual_sharetitle = normalize_relative_path(data.get("sharetitle", ""))
     if manual_sharetitle:
         sharetitle = manual_sharetitle
-    elif link_type == "115share":
+    elif is_share_receive_link:
         sharetitle = normalize_relative_path(extra.get("auto_sharetitle", ""))
     elif link_type == "magnet":
         # 磁力任务默认不绑定子目录提示，避免把原始链接文本误当目录。
         sharetitle = ""
-    elif link_type == "quark":
-        sharetitle = normalize_relative_path(extra.get("auto_sharetitle", ""))
     else:
         sharetitle = normalize_relative_path(resource.get("title", ""))
     monitor_task_name = str(data.get("monitor_task_name", "")).strip()
     refresh_delay_seconds = max(0, int(data.get("refresh_delay_seconds", 0) or 0))
     auto_refresh = bool(data.get("auto_refresh", True))
-    provider_label = "夸克" if link_type == "quark" else "115"
+    provider_label = (
+        str(getattr(share_provider, "label", "") or share_provider.name).strip()
+        if is_share_receive_link
+        else "115"
+    )
     cursor.execute(
         """
         INSERT INTO resource_jobs(

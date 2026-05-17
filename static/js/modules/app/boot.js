@@ -116,9 +116,9 @@
                 if (typeof populateSubscriptionProviderSelect === 'function') {
                     populateSubscriptionProviderSelect();
                 }
-                // 确保 settings 模块已加载，否则 renderProviderAuthBlocks 未挂载到 window
+                // 复用带 asset_version 的 tab 模块加载器，避免浏览器命中旧 settings.js 缓存后覆盖新 UI。
                 try {
-                    await import('/static/js/modules/tabs/settings.js');
+                    await loadSettingsTabModule();
                 } catch (_) { /* settings module may load via other path */ }
                 const sensitiveMeta = normalizeSensitiveConfigMeta(cfg.sensitive_configured || {});
                 if (typeof renderProviderAuthBlocks === 'function') {

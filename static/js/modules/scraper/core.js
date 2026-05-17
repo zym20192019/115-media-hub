@@ -2,7 +2,9 @@ const SCRAPER_JOB_ACTIVE_STATUSES = new Set(['pending', 'running', 'rollback_run
 
 function getScraperProviderOptions() {
     const meta = window.providerMeta || [];
-    return meta.filter(p => p.enabled).map(p => ({ provider: p.name, label: p.label }));
+    return meta
+        .filter(p => p.enabled && p.supports_folder_browse !== false)
+        .map(p => ({ provider: p.name, label: p.label }));
 }
 
 const state = {
@@ -72,19 +74,74 @@ async function showConfirm(message, options = {}) {
 }
 
 function normalizeProvider(value) {
-    const raw = String(value || '').trim().toLowerCase();
-    return raw === 'quark' || raw === '夸克' ? 'quark' : '115';
+    const rawInput = String(value || '').trim();
+    const raw = rawInput.toLowerCase();
+    if (!raw) return '115';
+    const aliases = {
+        pan115: '115',
+        '115pan': '115',
+        '夸克': 'quark',
+        '夸克网盘': 'quark',
+        '天翼': 'tianyi',
+        '天翼云盘': 'tianyi',
+        '189': 'tianyi',
+        cloud189: 'tianyi',
+        '123': '123pan',
+        '123云盘': '123pan',
+        alipan: 'aliyun',
+        '阿里': 'aliyun',
+        '阿里云盘': 'aliyun',
+    };
+    const normalized = aliases[raw] || raw;
+    const known = [
+        ...(Array.isArray(state?.providers) ? state.providers : []),
+        ...(Array.isArray(window.providerMeta) ? window.providerMeta : []),
+    ];
+    const matched = known.find(item => {
+        const providerName = String(item?.provider || item?.name || '').trim().toLowerCase();
+        const linkType = String(item?.link_type || '').trim().toLowerCase();
+        return providerName === normalized || linkType === normalized;
+    });
+    return String(matched?.provider || matched?.name || normalized || '115').trim() || '115';
+}
+
+function getProviderInfo(provider = state.provider) {
+    const normalized = normalizeProvider(provider);
+    return state.providers.find(item => normalizeProvider(item.provider) === normalized)
+        || (window.providerMeta || []).find(item => normalizeProvider(item.name) === normalized)
+        || null;
+}
+
+function getProviderOperations(provider = state.provider) {
+    const normalized = normalizeProvider(provider);
+    const info = getProviderInfo(normalized);
+    if (info?.operations && typeof info.operations === 'object') return info.operations;
+    const legacyFullOps = normalized === '115' || normalized === 'quark';
+    return {
+        browse: true,
+        create_folder: true,
+        rename: legacyFullOps,
+        copy: legacyFullOps,
+        move: legacyFullOps,
+        delete: legacyFullOps,
+        scrape: legacyFullOps,
+        rollback: legacyFullOps,
+    };
+}
+
+function supportsProviderOperation(operation, provider = state.provider) {
+    return getProviderOperations(provider)?.[operation] === true;
 }
 
 function getProviderLabel(provider = state.provider) {
-    const options = getScraperProviderOptions();
-    const p = options.find(o => o.provider === normalizeProvider(provider));
-    return p ? p.label : (provider === 'quark' ? '夸克' : '115');
+    const normalized = normalizeProvider(provider);
+    const p = getProviderInfo(normalized) || getScraperProviderOptions().find(o => normalizeProvider(o.provider) === normalized);
+    return p ? (p.label || normalized) : normalized;
 }
 
 function isProviderConfigured(provider = state.provider) {
     const normalized = normalizeProvider(provider);
-    const item = state.providers.find(providerInfo => normalizeProvider(providerInfo.provider) === normalized);
+    const item = getProviderInfo(normalized);
     return !!item?.configured;
 }
 
@@ -443,12 +500,13 @@ function renderProviderStatus() {
     if (!el) return;
     const providerLabel = getProviderLabel();
     if (!isProviderConfigured()) {
-        el.textContent = `${providerLabel} Cookie 未配置，文件管理和刮削执行暂不可用。`;
+        el.textContent = `${providerLabel} 认证信息未配置，文件管理和刮削执行暂不可用。`;
         return;
     }
     const folderCount = Number(state.summary.folder_count || 0);
     const fileCount = Number(state.summary.file_count || 0);
-    el.textContent = `${providerLabel} / 当前目录 ${folderCount} 个文件夹、${fileCount} 个文件`;
+    const scrapeNote = supportsProviderOperation('scrape') ? '' : ' / 暂不支持刮削执行';
+    el.textContent = `${providerLabel} / 当前目录 ${folderCount} 个文件夹、${fileCount} 个文件${scrapeNote}`;
 }
 
 function renderBreadcrumbs() {
@@ -517,12 +575,14 @@ function renderSelection() {
     const selectedInCurrent = state.entries.filter(item => state.selected.has(item.id)).length;
     const renameButton = document.querySelector('[data-scraper-action="rename-selected"]');
     if (renameButton) {
-        const canRename = selectedEntries.length === 1 && !hasPlan;
+        const canRename = supportsProviderOperation('rename') && selectedEntries.length === 1 && !hasPlan;
         renameButton.classList.remove('hidden');
         renameButton.disabled = state.loading || !canRename;
         renameButton.classList.toggle('btn-disabled', state.loading || !canRename);
         renameButton.textContent = '重命名';
-        renameButton.title = canRename ? '重命名选中的文件或文件夹' : '请选择一个文件或文件夹进行重命名';
+        renameButton.title = supportsProviderOperation('rename')
+            ? (canRename ? '重命名选中的文件或文件夹' : '请选择一个文件或文件夹进行重命名')
+            : `${getProviderLabel()} 暂不支持重命名`;
     }
     const clearIdentifyButton = document.querySelector('[data-scraper-action="clear-identify"]');
     if (clearIdentifyButton) {
@@ -537,10 +597,10 @@ function renderSelection() {
     }
     const actionRules = {
         'select-range': !hasPlan && selectedInCurrent >= 2,
-        'prepare-copy': hasSelection,
-        'prepare-move': hasSelection,
-        'delete-selected': hasSelection,
-        identify: hasSelection,
+        'prepare-copy': supportsProviderOperation('copy') && hasSelection,
+        'prepare-move': supportsProviderOperation('move') && hasSelection,
+        'delete-selected': supportsProviderOperation('delete') && hasSelection,
+        identify: supportsProviderOperation('scrape') && hasSelection,
     };
     Object.entries(actionRules).forEach(([action, enabled]) => {
         const button = document.querySelector(`[data-scraper-action="${action}"]`);
@@ -559,8 +619,9 @@ function renderSelection() {
     if (inlineExecuteBtn) {
         const showExecute = hasPlan;
         inlineExecuteBtn.classList.toggle('hidden', !showExecute);
-        inlineExecuteBtn.disabled = state.executeBusy || selectedReadyCount <= 0;
-        inlineExecuteBtn.classList.toggle('btn-disabled', state.executeBusy || selectedReadyCount <= 0);
+        const executeDisabled = state.executeBusy || selectedReadyCount <= 0 || !supportsProviderOperation('scrape');
+        inlineExecuteBtn.disabled = executeDisabled;
+        inlineExecuteBtn.classList.toggle('btn-disabled', executeDisabled);
         inlineExecuteBtn.textContent = state.executeBusy ? '提交中...' : `执行重命名 ${selectedReadyCount} 项`;
     }
     syncFolderScopedControls();
@@ -571,7 +632,7 @@ function syncBuildPlanControls() {
     const selectedEntries = getEffectiveSelectedEntries();
     const hasBinding = !!(state.tmdb && Number(state.tmdb.tmdb_id || state.tmdb.id || 0) > 0);
     const hasPlan = getPlanActions().length > 0;
-    const showBuild = selectedEntries.length > 0 && hasBinding && !hasPlan;
+    const showBuild = supportsProviderOperation('scrape') && selectedEntries.length > 0 && hasBinding && !hasPlan;
     const inlineBuildBtn = $('scraper-inline-build-plan-btn');
     if (inlineBuildBtn) {
         inlineBuildBtn.classList.toggle('hidden', !showBuild);
@@ -629,6 +690,13 @@ function renderEntries() {
         refreshBtn.disabled = !!state.loading;
         refreshBtn.classList.toggle('btn-disabled', !!state.loading);
     }
+    const canCreateFolder = isProviderConfigured() && supportsProviderOperation('create_folder');
+    document.querySelectorAll('[data-scraper-action="toggle-create-folder"], [data-scraper-action="create-folder"]').forEach((button) => {
+        const disabled = state.loading || !canCreateFolder;
+        button.disabled = disabled;
+        button.classList.toggle('btn-disabled', disabled);
+        button.title = canCreateFolder ? (button.title || '新建文件夹') : `${getProviderLabel()} 暂不支持新建文件夹`;
+    });
     const header = document.querySelector('.scraper-entry-header');
     const table = document.querySelector('.scraper-entry-table');
     const planActions = getPlanActions();
@@ -1074,13 +1142,15 @@ function renderPlan() {
     if (inlineExecuteBtn) {
         const showExecute = getPlanActions().length > 0;
         inlineExecuteBtn.classList.toggle('hidden', !showExecute);
-        inlineExecuteBtn.disabled = state.executeBusy || selectedReadyCount <= 0;
-        inlineExecuteBtn.classList.toggle('btn-disabled', state.executeBusy || selectedReadyCount <= 0);
+        const executeDisabled = state.executeBusy || selectedReadyCount <= 0 || !supportsProviderOperation('scrape');
+        inlineExecuteBtn.disabled = executeDisabled;
+        inlineExecuteBtn.classList.toggle('btn-disabled', executeDisabled);
         inlineExecuteBtn.textContent = state.executeBusy ? '提交中...' : `执行重命名 ${selectedReadyCount} 项`;
     }
     if (executeBtn) {
-        executeBtn.disabled = state.executeBusy || selectedReadyCount <= 0;
-        executeBtn.classList.toggle('btn-disabled', state.executeBusy || selectedReadyCount <= 0);
+        const executeDisabled = state.executeBusy || selectedReadyCount <= 0 || !supportsProviderOperation('scrape');
+        executeBtn.disabled = executeDisabled;
+        executeBtn.classList.toggle('btn-disabled', executeDisabled);
         executeBtn.textContent = state.executeBusy ? '提交中...' : `执行重命名 ${selectedReadyCount} 项`;
     }
     if (!summary || !list) return;

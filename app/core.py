@@ -1452,6 +1452,24 @@ SUBSCRIPTION_SCAN_RECOMMENDED_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "share_scan_concurrency": 2,
         "share_scan_rate_limit_seconds": 0.35,
     },
+    "tianyi": {
+        "candidate_scan_prefetch_limit": 3,
+        "candidate_scan_concurrency": 1,
+        "share_scan_concurrency": 1,
+        "share_scan_rate_limit_seconds": 1.0,
+    },
+    "123pan": {
+        "candidate_scan_prefetch_limit": 3,
+        "candidate_scan_concurrency": 1,
+        "share_scan_concurrency": 1,
+        "share_scan_rate_limit_seconds": 1.0,
+    },
+    "aliyun": {
+        "candidate_scan_prefetch_limit": 3,
+        "candidate_scan_concurrency": 1,
+        "share_scan_concurrency": 1,
+        "share_scan_rate_limit_seconds": 1.0,
+    },
 }
 
 

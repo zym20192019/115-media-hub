@@ -2822,25 +2822,13 @@ async def run_subscription_task(
         if task["media_type"] == "tv":
             upsert_subscription_task_state(task_name, status="running", progress=47, detail="正在读取目标目录已落盘剧集")
             try:
-                if provider == "115":
-                    scan_result = await asyncio.to_thread(
-                        _scan_115_existing_tv_episodes,
-                        cookie_115,
-                        folder_id,
-                        task,
-                    )
-                else:
-                    scan_result = {
-                        "episodes": [],
-                        "scanned_dirs": 0,
-                        "scanned_entries": 0,
-                        "failed_dirs": 0,
-                        "truncated": False,
-                    }
-                    await write_subscription_log(
-                        f"{provider_label} 目标目录暂不做本地剧集反扫，本次将主要依赖订阅账本与分享清单判断缺集",
-                        "info",
-                    )
+                scan_result = await asyncio.to_thread(
+                    _scan_provider_existing_tv_episodes,
+                    provider_meta,
+                    cookie_115,
+                    folder_id,
+                    task,
+                )
                 scan_episodes = scan_result.get("episodes", []) if isinstance(scan_result.get("episodes"), list) else []
                 existing_folder_episodes = _clamp_episode_values(
                     {max(0, int(item or 0)) for item in scan_episodes if max(0, int(item or 0)) > 0},
@@ -3137,16 +3125,9 @@ async def run_subscription_task(
             await asyncio.sleep(attempt_interval_seconds)
 
         async def rescan_existing_tv_episodes() -> Tuple[Dict[str, Any], Set[int]]:
-            if provider != "115":
-                return {
-                    "episodes": [],
-                    "scanned_dirs": 0,
-                    "scanned_entries": 0,
-                    "failed_dirs": 0,
-                    "truncated": False,
-                }, set()
             scan_result = await asyncio.to_thread(
-                _scan_115_existing_tv_episodes,
+                _scan_provider_existing_tv_episodes,
+                provider_meta,
                 cookie_115,
                 folder_id,
                 task,

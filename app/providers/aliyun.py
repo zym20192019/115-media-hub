@@ -124,6 +124,8 @@ class AliyunProvider(CloudProvider):
             timeout=timeout,
         )
         resp.raise_for_status()
+        if resp.status_code == 204 or not resp.text.strip():
+            return {}
         data = resp.json()
         if not isinstance(data, dict):
             raise RuntimeError("阿里云盘 API 返回格式异常")
@@ -182,7 +184,13 @@ class AliyunProvider(CloudProvider):
                 "size": int(item.get("size", 0) or 0),
                 "parent_id": str(item.get("parent_file_id", cid)),
             })
-        return {"entries": entries, "total": len(entries)}
+        folder_count = sum(1 for item in entries if item.get("is_dir"))
+        file_count = sum(1 for item in entries if not item.get("is_dir"))
+        return {
+            "entries": entries,
+            "total": len(entries),
+            "summary": {"folder_count": folder_count, "file_count": file_count},
+        }
 
     def list_entries(self, cookie, cid="root"):
         return self.list_entries_payload(cookie, cid)["entries"]
@@ -345,13 +353,16 @@ class AliyunProvider(CloudProvider):
             drive_id = str(entries[0].get("drive_id", "") or "").strip()
             if drive_id:
                 share_meta["drive_id"] = drive_id
+        folder_count = sum(1 for item in entries if item.get("is_dir"))
+        file_count = sum(1 for item in entries if not item.get("is_dir"))
         return {
             "entries": entries,
             "total": next_offset + (1 if next_marker else 0),
             "offset": normalized_offset,
             "next_offset": next_offset,
             "has_more": bool(next_marker),
-            "share": share_meta,
+            "share_title": share_meta,
+            "summary": {"folder_count": folder_count, "file_count": file_count},
         }
 
     def prepare_share_receive(self, cookie, share_payload, cid="root"):

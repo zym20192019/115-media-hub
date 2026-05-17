@@ -114,30 +114,6 @@
             }
 
             renderResourceImportSummary();
-
-            // Render magnet provider selector for "ask" mode
-            const magnetProviderSelector = document.getElementById('resource-magnet-provider-selector');
-            if (magnetProviderSelector) {
-                if (importMode && currentLinkType === 'magnet') {
-                    const cfg = window._appConfig || {};
-                    const magnetMode = cfg.default_magnet_provider || '115';
-                    if (magnetMode === 'ask') {
-                        const meta = window.providerMeta || [];
-                        const offlineProviders = meta.filter(p => p.supports_offline && p.enabled);
-                        magnetProviderSelector.classList.remove('hidden');
-                        magnetProviderSelector.innerHTML = `
-                            <div class="text-xs text-slate-400 mb-2">选择下载网盘</div>
-                            <select id="resource-magnet-provider" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200">
-                                ${offlineProviders.map(p => `<option value="${p.name}">${p.label}</option>`).join('')}
-                            </select>
-                        `;
-                    } else {
-                        magnetProviderSelector.classList.add('hidden');
-                    }
-                } else {
-                    magnetProviderSelector.classList.add('hidden');
-                }
-            }
         }
 
         function openResourceItemModal(item, mode = 'detail') {
@@ -316,12 +292,6 @@
                 const currentLinkType = getEffectiveResourceLinkType(selectedResourceItem);
                 const currentProvider = getCurrentResourceProvider();
                 const currentProviderLabel = getResourceProviderLabel(currentProvider);
-                const cfg = window._appConfig || {};
-                const magnetMode = cfg.default_magnet_provider || '115';
-                let magnetProvider = magnetMode;
-                if (magnetMode === 'ask') {
-                    magnetProvider = document.getElementById('resource-magnet-provider')?.value || '115';
-                }
                 const selectionState = getResourceShareSelectionState();
                 const hasLoadedShareSelectableOption = Object.keys(resourceShareEntryIndex || {}).length > 0;
                 if (!batchMode && isCurrentResource115Share() && resourceShareRootLoaded && !selectionState.selected_ids.length && hasLoadedShareSelectableOption) {
@@ -364,7 +334,6 @@
                             savepath,
                             refresh_delay_seconds: refreshDelaySeconds,
                             auto_refresh: true,
-                            magnet_provider: magnetProvider,
                             resource: serializeTransientResourceForJob(batchItem)
                         };
                         if (folderId && folderId !== '0') payload.folder_id = folderId;
@@ -444,8 +413,7 @@
                 const payload = {
                     savepath,
                     refresh_delay_seconds: refreshDelaySeconds,
-                    auto_refresh: currentLinkType === 'magnet' || !!((window.providerMeta || []).find(m => m.name === currentProvider)?.supports_monitor),
-                    magnet_provider: magnetProvider
+                    auto_refresh: currentLinkType === 'magnet' || !!((window.providerMeta || []).find(m => m.name === currentProvider)?.supports_monitor)
                 };
                 if (folderId && folderId !== '0') payload.folder_id = folderId;
                 if (Number(selectedResourceId || 0) > 0) payload.resource_id = selectedResourceId;

@@ -124,9 +124,6 @@
                 if (typeof renderProviderAuthBlocks === 'function') {
                     renderProviderAuthBlocks(cfg, sensitiveMeta);
                 }
-                if (typeof renderMagnetProviderSetting === 'function') {
-                    renderMagnetProviderSetting(cfg);
-                }
                 if (typeof renderCookieHealthBar === 'function') {
                     renderCookieHealthBar(cfg.cookie_health || {});
                 }
@@ -169,7 +166,6 @@
                     const cookieKey = p.config_keys[0] || ('cookie_' + p.name);
                     dynamicCookieConfigured['cookie_configured_' + p.name] = !!sensitiveMeta[cookieKey];
                 });
-                window._appConfig = cfg;
                 const resourceStateUpdates = {
                     ...resourceState,
                     sources: cfg.resource_sources || [],

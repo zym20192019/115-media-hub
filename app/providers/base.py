@@ -128,6 +128,8 @@ class CloudProvider(ABC):
     def auth_label(self) -> str:
         if self.auth_type == "cookie":
             return "Cookie"
+        if self.auth_type == "password_cookie":
+            return "账号密码 / Cookie"
         if self.auth_type == "refresh_token":
             return "refresh_token"
         return "认证信息"

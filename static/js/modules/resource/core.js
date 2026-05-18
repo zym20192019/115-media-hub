@@ -161,6 +161,43 @@
             return getProviderMeta().find(p => p.link_type === normalized) || null;
         }
 
+        function getOfflineMagnetProviders() {
+            return getProviderMeta().filter(p => p && p.supports_offline && p.enabled !== false);
+        }
+
+        function normalizeResourceMagnetProviderName(provider, fallback = '115') {
+            const normalized = String(provider || '').trim().toLowerCase();
+            const offlineProviders = getOfflineMagnetProviders();
+            const matched = offlineProviders.find(p => p.name === normalized);
+            if (matched) return matched.name;
+            const fallbackName = String(fallback || '115').trim().toLowerCase();
+            const fallbackMatched = offlineProviders.find(p => p.name === fallbackName);
+            if (fallbackMatched) return fallbackMatched.name;
+            return offlineProviders[0]?.name || '115';
+        }
+
+        function getResourceDefaultMagnetProvider() {
+            const settingEl = document.getElementById('default_magnet_provider');
+            const rawValue = settingEl
+                ? settingEl.value
+                : (resourceState?.default_magnet_provider || '115');
+            const normalized = String(rawValue || '115').trim().toLowerCase();
+            if (normalized === 'ask') return 'ask';
+            return normalizeResourceMagnetProviderName(normalized);
+        }
+
+        function getResourceSelectedMagnetProvider() {
+            const defaultProvider = getResourceDefaultMagnetProvider();
+            if (defaultProvider !== 'ask') return defaultProvider;
+            const selectorValue = document.getElementById('resource-magnet-provider')?.value || selectedMagnetProvider || '';
+            return normalizeResourceMagnetProviderName(selectorValue);
+        }
+
+        function setResourceMagnetProviderSelection(provider) {
+            selectedMagnetProvider = normalizeResourceMagnetProviderName(provider);
+            return selectedMagnetProvider;
+        }
+
         function getResourceLinkTypeLabel(linkType) {
             const normalized = String(linkType || 'unknown').trim().toLowerCase();
             const p = getProviderByLinkType(normalized);
@@ -185,9 +222,7 @@
 
         function getResourceProviderByLinkType(linkType) {
             if (linkType === 'magnet') {
-                const el = document.getElementById('default_magnet_provider');
-                const name = el ? el.value : '115';
-                return name !== 'ask' ? name : '115';
+                return getResourceSelectedMagnetProvider();
             }
             const p = getProviderByLinkType(linkType);
             return p ? p.name : '115';
@@ -402,14 +437,14 @@
             let tone = 'warn';
             if (!configuredAny) {
                 const labels = wm.length ? wm.map(p => p.label).join('、') : '115 或 Quark';
-                message = `尚未配置可用网盘 Cookie。请在”参数配置”填写 ${labels} Cookie，保存后可点击”立即检测 Cookie”。`;
+                message = `尚未配置可用网盘认证信息。请在”参数配置”填写 ${labels} 认证信息，保存后可点击健康检查。`;
             } else if (riskyProviders.length) {
                 const hasInvalid = riskyProviders.some((item) => item.entry.state === 'invalid');
                 tone = hasInvalid ? 'error' : 'warn';
                 const detailText = riskyProviders
                     .map((item) => `${item.label}：${item.entry.message}`)
                     .join('；');
-                message = `检测到网盘 Cookie 状态异常（${detailText}）。可继续执行，但建议在“参数配置”更新后重新检测。`;
+                message = `检测到网盘认证状态异常（${detailText}）。可继续执行，但建议在“参数配置”更新后重新检测。`;
             }
 
             hintEl.classList.toggle('hidden', !message);
@@ -1083,10 +1118,7 @@
             if (!String(item?.link_url || '').trim()) return '暂无可导入链接';
             if (isResourceShareLinkType(linkType)) return `转存到${getResourceProviderLabel(getResourceProviderByLinkType(linkType))}`;
             if (linkType === 'magnet') {
-                const el = document.getElementById('default_magnet_provider');
-                const name = el ? el.value : '115';
-                if (name === 'ask') return '下载磁力链接';
-                const p = getProviderByName(name);
+                const p = getProviderByName(getResourceSelectedMagnetProvider());
                 return '下载到 ' + (p ? p.label : '115网盘');
             }
             return '当前不可导入';
@@ -1643,7 +1675,8 @@
             const tasks = Array.isArray(resourceState.monitor_tasks) && resourceState.monitor_tasks.length
                 ? resourceState.monitor_tasks
                 : (monitorState.tasks || []);
-            const mountPath = normalizeRemotePathInput(getMountPrefixByProvider('115') || '/115');
+            const provider = getCurrentResourceProvider();
+            const mountPath = normalizeRemotePathInput(getMountPrefixByProvider(provider) || `/${provider}`);
             const fullPath = normalizeRemotePathInput(joinRelativePathInput(mountPath, normalizedSavepath));
             let matchedTask = null;
             let bestDepth = -1;
@@ -3185,6 +3218,10 @@
             getCurrentResourceProvider,
             getResourceProviderLabel,
             normalizeResourceProviderName,
+            getOfflineMagnetProviders,
+            getResourceDefaultMagnetProvider,
+            getResourceSelectedMagnetProvider,
+            setResourceMagnetProviderSelection,
             getResourceProviderByLinkType,
             getEffectiveResourceLinkType,
             isLinkTypeCookieConfigured,

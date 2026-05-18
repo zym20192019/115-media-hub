@@ -215,7 +215,7 @@ async def test_provider_cookie(request: Request) -> JSONResponse:
 
             ok = await asyncio.to_thread(provider.probe_connectivity, credential_value)
             if ok:
-                return JSONResponse(content={"ok": True})
+                return JSONResponse(content={"ok": True, "message": f"{provider.label} 认证信息可用"})
             else:
                 return JSONResponse(content={"ok": False, "error": f"{provider.label} 连接检测失败，请检查认证信息是否有效"})
         except Exception as e:

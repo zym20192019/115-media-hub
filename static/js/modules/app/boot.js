@@ -169,8 +169,17 @@
                 const meta = window.providerMeta || [];
                 meta.forEach(p => {
                     dynamicFavDirs[p.name] = [];
-                    const cookieKey = p.config_keys[0] || ('cookie_' + p.name);
-                    dynamicCookieConfigured['cookie_configured_' + p.name] = !!sensitiveMeta[cookieKey];
+                    const configKeys = Array.isArray(p.config_keys) && p.config_keys.length ? p.config_keys : ['cookie_' + p.name];
+                    const cookieKey = configKeys[0] || ('cookie_' + p.name);
+                    if (p.auth_type === 'password') {
+                        dynamicCookieConfigured['cookie_configured_' + p.name] = configKeys.every((key) => !!sensitiveMeta[key]);
+                    } else if (p.auth_type === 'password_cookie') {
+                        const usernameKey = configKeys[1] || '';
+                        const passwordKey = configKeys[2] || '';
+                        dynamicCookieConfigured['cookie_configured_' + p.name] = !!sensitiveMeta[cookieKey] || (!!sensitiveMeta[usernameKey] && !!sensitiveMeta[passwordKey]);
+                    } else {
+                        dynamicCookieConfigured['cookie_configured_' + p.name] = !!sensitiveMeta[cookieKey];
+                    }
                 });
                 const resourceStateUpdates = {
                     ...resourceState,
@@ -182,7 +191,8 @@
                     quark_cookie_configured: !!sensitiveMeta.cookie_quark,
                     cookie_health: cfg.cookie_health && typeof cfg.cookie_health === 'object'
                         ? cfg.cookie_health
-                        : (resourceState.cookie_health || null)
+                        : (resourceState.cookie_health || null),
+                    default_magnet_provider: cfg.default_magnet_provider || resourceState.default_magnet_provider || '115'
                 };
                 Object.assign(resourceStateUpdates, dynamicCookieConfigured);
                 applyResourceState(resourceStateUpdates);

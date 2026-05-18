@@ -139,28 +139,24 @@ def _get_provider_cookie(provider: str, cfg: Optional[Dict[str, Any]] = None) ->
     return p.get_cookie(active_cfg)
 
 
-def _supports_scraper_file_operations(provider: str) -> bool:
-    normalized = normalize_scraper_provider(provider)
-    p = get_provider_or_none(normalized) if normalized else None
-    if not p:
-        return False
-    return bool(p.supports_rename and p.supports_move and p.supports_copy and p.supports_delete)
-
-
 def _build_scraper_operations(provider: str) -> Dict[str, bool]:
     normalized = normalize_scraper_provider(provider)
     p = get_provider_or_none(normalized)
     browse_supported = bool(p and p.supports_folder_browse)
-    file_ops_supported = _supports_scraper_file_operations(normalized)
+    rename_supported = bool(p and p.supports_rename)
+    move_supported = bool(p and p.supports_move)
+    copy_supported = bool(p and p.supports_copy)
+    delete_supported = bool(p and p.supports_delete)
+    scrape_supported = bool(browse_supported and rename_supported and move_supported)
     return {
         "browse": browse_supported,
         "create_folder": browse_supported,
-        "rename": file_ops_supported,
-        "copy": file_ops_supported,
-        "move": file_ops_supported,
-        "delete": file_ops_supported,
-        "scrape": file_ops_supported,
-        "rollback": file_ops_supported,
+        "rename": rename_supported,
+        "copy": copy_supported,
+        "move": move_supported,
+        "delete": delete_supported,
+        "scrape": scrape_supported,
+        "rollback": scrape_supported,
     }
 
 

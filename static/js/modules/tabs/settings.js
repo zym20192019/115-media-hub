@@ -171,14 +171,11 @@ function collectSettingsPayload({
     const meta = window.providerMeta || [];
     const providerEnabled = {};
     meta.forEach(p => {
-        const cookieKey = p.config_keys[0] || 'cookie_' + p.name;
-        const el = document.getElementById(cookieKey);
-        if (el) cfg[cookieKey] = el.value;
-        const passwordKey = p.config_keys[1] || '';
-        if (passwordKey) {
-            const pwEl = document.getElementById(passwordKey);
-            if (pwEl) cfg[passwordKey] = pwEl.value;
-        }
+        const keys = Array.isArray(p.config_keys) && p.config_keys.length ? p.config_keys : ['cookie_' + p.name];
+        keys.forEach((key) => {
+            const el = document.getElementById(key);
+            if (el) cfg[key] = el.value;
+        });
         const enabledEl = document.getElementById('provider_enabled_' + p.name);
         providerEnabled[p.name] = enabledEl ? enabledEl.checked : p.enabled;
     });
@@ -610,15 +607,22 @@ export function renderProviderAuthBlocks(cfg, sensitiveMeta) {
 
     container.innerHTML = meta.map(p => {
         const enabled = p.enabled;
-        const cookieKey = p.config_keys[0] || 'cookie_' + p.name;
-        const passwordKey = p.config_keys[1] || '';
+        const configKeys = Array.isArray(p.config_keys) && p.config_keys.length ? p.config_keys : ['cookie_' + p.name];
+        const cookieKey = configKeys[0] || 'cookie_' + p.name;
+        const passwordKey = configKeys[1] || '';
+        const mixedUsernameKey = configKeys[1] || '';
+        const mixedPasswordKey = configKeys[2] || '';
         const isConfigured = p.auth_type === 'password'
             ? (!!sm[cookieKey] && !!sm[passwordKey])
+            : p.auth_type === 'password_cookie'
+            ? ((!!sm[mixedUsernameKey] && !!sm[mixedPasswordKey]) || !!sm[cookieKey])
             : !!sm[cookieKey];
         const placeholder = p.auth_type === 'refresh_token'
             ? '粘贴 refresh_token'
             : p.auth_type === 'password'
             ? '输入 ' + p.label + ' 账号'
+            : p.auth_type === 'password_cookie'
+            ? '粘贴 ' + p.label + ' Cookie（账号密码触发验证码时备用）'
             : '粘贴 ' + p.label + ' Cookie';
 
         let authHint = '';
@@ -628,6 +632,8 @@ export function renderProviderAuthBlocks(cfg, sensitiveMeta) {
             authHint = '<span class="text-xs text-slate-500">Cookie + OAuth2 自动续期</span>';
         } else if (p.auth_type === 'password') {
             authHint = '<span class="text-xs text-slate-500">账号密码登录，自动获取 Token</span>';
+        } else if (p.auth_type === 'password_cookie') {
+            authHint = '<span class="text-xs text-slate-500">优先账号密码登录；如触发验证码/短信/设备锁，可保留 Cookie 备用</span>';
         } else {
             authHint = '<span class="text-xs text-slate-500">从浏览器复制 Cookie</span>';
         }
@@ -659,6 +665,10 @@ export function renderProviderAuthBlocks(cfg, sensitiveMeta) {
                 (p.auth_type === 'password'
                     ? ('<input id="' + cookieKey + '" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-2" placeholder="' + placeholder + '">' +
                        '<input id="' + passwordKey + '" type="password" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-2" placeholder="输入 ' + p.label + ' 密码">')
+                    : p.auth_type === 'password_cookie'
+                    ? ('<input id="' + mixedUsernameKey + '" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-2" placeholder="输入 ' + p.label + ' 账号">' +
+                       '<input id="' + mixedPasswordKey + '" type="password" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-2" placeholder="输入 ' + p.label + ' 密码">' +
+                       '<textarea id="' + cookieKey + '" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-2 font-mono" rows="3" placeholder="' + placeholder + '"></textarea>')
                     : '<textarea id="' + cookieKey + '" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-2 font-mono" rows="3" placeholder="' + placeholder + '"></textarea>') +
                 '<div class="mt-2 flex items-center gap-2">' +
                     '<button type="button" onclick="testProviderCookie(\'' + p.name + '\')" class="text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded-lg transition-colors">健康检查</button>' +
@@ -690,24 +700,37 @@ async function testProviderCookie(name) {
     const cookie = String(credentials[cookieKey] || '').trim();
     const hasCurrentInput = p.auth_type === 'password'
         ? (Array.isArray(p.config_keys) ? p.config_keys : [cookieKey]).every(key => String(credentials[key] || '').trim())
+        : p.auth_type === 'password_cookie'
+        ? (!!cookie || (!!String(credentials[p.config_keys?.[1]] || '').trim() && !!String(credentials[p.config_keys?.[2]] || '').trim()))
         : !!cookie;
     const statusEl = document.getElementById('provider-health-' + name);
     if (statusEl) { statusEl.textContent = '检测中...'; statusEl.className = 'text-xs text-slate-500'; }
     if (!hasCurrentInput) {
-        let checked = false;
+        let result = null;
         if (typeof window.checkCookieHealthProvider === 'function') {
-            checked = !!(await window.checkCookieHealthProvider(name));
+            result = await window.checkCookieHealthProvider(name);
         }
         if (statusEl) {
-            statusEl.textContent = checked ? '已检查已保存认证' : '检查未完成，请看上方状态';
-            statusEl.className = 'text-xs text-slate-500';
+            const entry = latestCookieHealthState?.[name] || {};
+            const tone = getCookieHealthResultTone(entry);
+            const rawMessage = result && typeof result === 'object' && result.message
+                ? String(result.message)
+                : getCookieHealthResultText(entry, name);
+            const labelPrefix = `${getCookieHealthProviderLabel(name)}：`;
+            const message = rawMessage.startsWith(labelPrefix) ? rawMessage.slice(labelPrefix.length) : rawMessage;
+            statusEl.textContent = message;
+            statusEl.className = 'text-xs ' + (
+                tone === 'success' ? 'text-emerald-400' :
+                tone === 'error' ? 'text-red-400' :
+                tone === 'warn' ? 'text-amber-300' : 'text-slate-500'
+            );
         }
         return;
     }
     try {
         const resp = await window.MediaHubApi.postJson('/test_provider_cookie', { provider: name, cookie: cookie, credentials });
         if (statusEl) {
-            statusEl.textContent = resp && resp.ok ? '✓ 当前输入可用，保存后生效' : '✗ ' + ((resp && resp.error) || '连接失败');
+            statusEl.textContent = resp && resp.ok ? '✓ ' + ((resp && resp.message) || '当前输入可用，保存后生效') : '✗ ' + ((resp && resp.error) || '连接失败');
             statusEl.className = 'text-xs ' + (resp && resp.ok ? 'text-emerald-400' : 'text-red-400');
         }
     } catch (e) {
@@ -822,6 +845,64 @@ function getCookieHealthProviderLabel(name) {
     return String(provider?.label || name || '').trim();
 }
 
+function getCookieHealthResultTone(entry) {
+    const state = String(entry?.state || '').trim().toLowerCase();
+    if (state === 'valid') return 'success';
+    if (state === 'invalid' || state === 'error') return 'error';
+    if (state === 'missing' || state === 'unknown') return 'warn';
+    return 'info';
+}
+
+function getCookieHealthResultText(entry, providerName) {
+    const label = getCookieHealthProviderLabel(providerName);
+    const source = entry && typeof entry === 'object' ? entry : {};
+    const message = String(source.message || '').trim();
+    if (message) return message;
+    const state = String(source.state || '').trim().toLowerCase();
+    if (state === 'valid') return `${label} 认证信息可用`;
+    if (state === 'invalid') return `${label} 认证信息可能已失效`;
+    if (state === 'error') return `${label} 认证检测异常`;
+    if (state === 'missing') return `未配置 ${label} 认证信息`;
+    if (state === 'checking') return `正在检测 ${label} 认证信息...`;
+    return `${label} 认证状态未知`;
+}
+
+function summarizeCookieHealthResults(cookieHealthState, providerNames) {
+    const state = cookieHealthState && typeof cookieHealthState === 'object' ? cookieHealthState : {};
+    const names = Array.isArray(providerNames) ? providerNames : [];
+    const results = names.map((name) => {
+        const entry = state[name] && typeof state[name] === 'object' ? state[name] : {};
+        return {
+            provider: name,
+            label: getCookieHealthProviderLabel(name),
+            state: String(entry.state || '').trim().toLowerCase(),
+            tone: getCookieHealthResultTone(entry),
+            message: getCookieHealthResultText(entry, name),
+        };
+    });
+    const failing = results.filter(item => item.tone === 'error');
+    const pending = results.filter(item => item.tone === 'warn');
+    const valid = results.filter(item => item.tone === 'success');
+    let tone = 'success';
+    if (failing.length) tone = 'error';
+    else if (pending.length) tone = 'warning';
+    const detailItems = failing.length ? failing : (pending.length ? pending : results);
+    const detail = detailItems
+        .slice(0, 3)
+        .map(item => item.message)
+        .filter(Boolean)
+        .join('；');
+    const prefix = names.length === 1
+        ? `${results[0]?.label || getCookieHealthProviderLabel(names[0])}：`
+        : `健康检查：${valid.length} 个可用，${pending.length} 个待处理，${failing.length} 个异常。`;
+    return {
+        ok: failing.length === 0,
+        tone,
+        results,
+        message: `${prefix}${detail}`,
+    };
+}
+
 function getCookieHealthChipTone(state, provider) {
     if (provider?.enabled === false) return 'disabled';
     if (state === 'valid') return 'valid';
@@ -878,25 +959,32 @@ export async function checkCookieHealthProviders({
             providers: providerNames,
             force: !!force
         });
+        const nextState = data?.cookie_health && typeof data.cookie_health === 'object'
+            ? data.cookie_health
+            : previousState;
         if (data?.cookie_health && typeof applyCookieHealthState === 'function') {
             applyCookieHealthState(data.cookie_health);
         } else if (data?.cookie_health) {
             updateCookieHealthBar(data.cookie_health);
         }
+        const summary = summarizeCookieHealthResults(nextState, providerNames);
         if (typeof showToast === 'function') {
-            const label = providerNames.length === 1
-                ? getCookieHealthProviderLabel(providerNames[0])
-                : '全部网盘';
-            showToast(`${label}健康检查已完成`, { tone: 'success', duration: 2200, placement: 'top-center' });
+            showToast(summary.message, { tone: summary.tone, duration: summary.ok ? 2600 : 4200, placement: 'top-center' });
         }
-        return true;
+        return { ...summary, cookie_health: nextState };
     } catch (err) {
         if (typeof applyCookieHealthState === 'function') applyCookieHealthState(previousState);
         else updateCookieHealthBar(previousState);
         if (typeof showToast === 'function') {
             showToast(`健康检查失败：${err?.message || '请稍后重试'}`, { tone: 'error', duration: 3000, placement: 'top-center' });
         }
-        return false;
+        return {
+            ok: false,
+            tone: 'error',
+            results: [],
+            message: err?.message || '健康检查失败',
+            cookie_health: previousState,
+        };
     } finally {
         providerNames.forEach(name => cookieHealthBusyProviders.delete(name));
         if (typeof setBusy === 'function') setBusy(false);

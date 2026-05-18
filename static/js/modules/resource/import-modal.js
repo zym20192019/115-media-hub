@@ -84,7 +84,7 @@
             const currentProvider = getResourceProviderByLinkType(currentLinkType);
             const currentProviderLabel = getResourceProviderLabel(currentProvider);
             const currentProviderMeta = (window.providerMeta || []).find(m => m.name === currentProvider);
-            const providerSupportsMonitor = currentLinkType === 'magnet' || !!currentProviderMeta?.supports_monitor;
+            const providerSupportsMonitor = !!currentProviderMeta?.supports_monitor;
             if (!canOpenResourceImport(item)) {
                 hints.push('当前资源没有可直接导入的 magnet 或已启用网盘分享链接。');
             } else {
@@ -117,16 +117,52 @@
 
             const magnetSelector = document.getElementById('resource-magnet-provider-selector');
             if (magnetSelector) {
-                const el = document.getElementById('default_magnet_provider');
-                if (importMode && currentLinkType === 'magnet' && el && el.value === 'ask') {
-                    const meta = window.providerMeta || [];
-                    const offline = meta.filter(p => p.supports_offline && p.enabled);
+                const defaultMagnetProvider = getResourceDefaultMagnetProvider();
+                if (importMode && currentLinkType === 'magnet' && defaultMagnetProvider === 'ask') {
+                    const offline = getOfflineMagnetProviders();
+                    const selectedProvider = setResourceMagnetProviderSelection(
+                        document.getElementById('resource-magnet-provider')?.value
+                        || selectedMagnetProvider
+                        || offline[0]?.name
+                        || '115'
+                    );
                     magnetSelector.classList.remove('hidden');
-                    magnetSelector.innerHTML = '<div class="text-xs text-slate-400 mb-2">选择下载网盘</div><select id="resource-magnet-provider" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200">' + offline.map(p => '<option value="' + p.name + '">' + p.label + '</option>').join('') + '</select>';
+                    magnetSelector.innerHTML = '<div class="text-xs text-slate-400 mb-2">选择下载网盘</div><select id="resource-magnet-provider" onchange="setResourceMagnetProvider(this.value)" class="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200">' + offline.map(p => '<option value="' + p.name + '" ' + (p.name === selectedProvider ? 'selected' : '') + '>' + p.label + '</option>').join('') + '</select>';
                 } else {
                     magnetSelector.classList.add('hidden');
                 }
             }
+        }
+
+        function setResourceMagnetProvider(provider) {
+            const nextProvider = setResourceMagnetProviderSelection(provider);
+            const selector = document.getElementById('resource-magnet-provider');
+            if (selector && selector.value !== nextProvider) selector.value = nextProvider;
+            if (resourceModalMode !== 'import' || resourceModalLinkType !== 'magnet' || !selectedResourceItem) return;
+
+            const rememberedFolder = getRememberedResourceFolderSelection();
+            resourceFolderTrail = normalizeResourceFolderTrail(rememberedFolder.trail);
+            resourceFolderEntries = [];
+            resourceFolderSummary = { folder_count: 0, file_count: 0 };
+            resourceFolderLoading = false;
+            resourceFolderFilesLoading = false;
+            resourceFolderEntriesComplete = false;
+            resourceFolderShowAllFiles = false;
+            resourceTargetPreviewEntries = [];
+            resourceTargetPreviewSummary = { folder_count: 0, file_count: 0 };
+            resourceTargetPreviewLoading = false;
+            resourceTargetPreviewError = '';
+            setSelectedResourceFolder(
+                rememberedFolder.folder_id || '0',
+                rememberedFolder.display_path || '',
+                {
+                    loadPreview: true,
+                    persist: false,
+                    trail: resourceFolderTrail
+                }
+            );
+            renderResourceModalLayout(selectedResourceItem);
+            renderResourceImportSummary();
         }
 
         function openResourceItemModal(item, mode = 'detail') {
@@ -135,6 +171,7 @@
             selectedResourceItem = item;
             resourceModalMode = mode === 'import' ? 'import' : 'detail';
             resourceModalLinkType = getEffectiveResourceLinkType(item);
+            if (resourceModalLinkType === 'magnet') selectedMagnetProvider = '';
             document.getElementById('resource-import-poster').innerHTML = buildResourcePoster(item);
             document.getElementById('resource-import-title').innerText = item.title || '未命名资源';
             document.getElementById('resource-import-subtitle').innerText = `来源：${item.source_name || item.channel_name || '手动录入'} / 时间：${item.published_at ? formatTimeText(item.published_at) : formatTimeText(item.created_at)}`;
@@ -213,6 +250,7 @@
             selectedResourceItem = null;
             resourceModalMode = 'detail';
             resourceModalLinkType = '';
+            selectedMagnetProvider = '';
             setResourceBatchImportItems([]);
             resetResourceShareState();
             hideLockedModal('resource-import-modal');
@@ -305,9 +343,7 @@
                 const currentLinkType = getEffectiveResourceLinkType(selectedResourceItem);
                 const currentProvider = getCurrentResourceProvider();
                 const currentProviderLabel = getResourceProviderLabel(currentProvider);
-                const magnetEl = document.getElementById('default_magnet_provider');
-                let magnetProvider = magnetEl ? magnetEl.value : '115';
-                if (magnetProvider === 'ask') magnetProvider = document.getElementById('resource-magnet-provider')?.value || '115';
+                const magnetProvider = currentLinkType === 'magnet' ? getResourceSelectedMagnetProvider() : getResourceDefaultMagnetProvider();
                 const selectionState = getResourceShareSelectionState();
                 const hasLoadedShareSelectableOption = Object.keys(resourceShareEntryIndex || {}).length > 0;
                 if (!batchMode && isCurrentResource115Share() && resourceShareRootLoaded && !selectionState.selected_ids.length && hasLoadedShareSelectableOption) {
@@ -349,7 +385,7 @@
                         const payload = {
                             savepath,
                             refresh_delay_seconds: refreshDelaySeconds,
-                            auto_refresh: true,
+                            auto_refresh: !!((window.providerMeta || []).find(m => m.name === magnetProvider)?.supports_monitor),
                             magnet_provider: magnetProvider,
                             resource: serializeTransientResourceForJob(batchItem)
                         };
@@ -430,7 +466,7 @@
                 const payload = {
                     savepath,
                     refresh_delay_seconds: refreshDelaySeconds,
-                    auto_refresh: currentLinkType === 'magnet' || !!((window.providerMeta || []).find(m => m.name === currentProvider)?.supports_monitor),
+                    auto_refresh: !!((window.providerMeta || []).find(m => m.name === currentProvider)?.supports_monitor),
                     magnet_provider: magnetProvider
                 };
                 if (folderId && folderId !== '0') payload.folder_id = folderId;
@@ -457,7 +493,7 @@
                 releaseResourceSubmitLock(submitLockToken, { render: false });
                 refreshResourceJobsAfterSubmit();
                 const matchedTaskName = String(data.monitor_task_name || '').trim();
-                const providerSupportsMonitor = currentLinkType === 'magnet' || !!((window.providerMeta || []).find(m => m.name === currentProvider)?.supports_monitor);
+                const providerSupportsMonitor = !!((window.providerMeta || []).find(m => m.name === currentProvider)?.supports_monitor);
                 const tail = !providerSupportsMonitor
                     ? `，${currentProviderLabel} 链路不联动文件夹监控`
                     : (
@@ -703,6 +739,7 @@
             openResourceImportModal,
             closeResourceJobModal,
             submitResourceJob,
+            setResourceMagnetProvider,
             copyResourceRecord,
             renderResourceFolderList,
             loadResourceFolderFiles,

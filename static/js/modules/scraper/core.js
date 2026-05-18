@@ -97,19 +97,20 @@ function normalizeProvider(value) {
 
 function buildProviderOperationsFromMeta(item = {}) {
     const browseSupported = item?.supports_folder_browse !== false;
-    const fileOpsSupported = item?.supports_rename === true
-        && item?.supports_move === true
-        && item?.supports_copy === true
-        && item?.supports_delete === true;
+    const renameSupported = item?.supports_rename === true;
+    const moveSupported = item?.supports_move === true;
+    const copySupported = item?.supports_copy === true;
+    const deleteSupported = item?.supports_delete === true;
+    const scrapeSupported = browseSupported && renameSupported && moveSupported;
     return {
         browse: browseSupported,
         create_folder: browseSupported,
-        rename: fileOpsSupported,
-        copy: fileOpsSupported,
-        move: fileOpsSupported,
-        delete: fileOpsSupported,
-        scrape: fileOpsSupported,
-        rollback: fileOpsSupported,
+        rename: renameSupported,
+        copy: copySupported,
+        move: moveSupported,
+        delete: deleteSupported,
+        scrape: scrapeSupported,
+        rollback: scrapeSupported,
     };
 }
 

@@ -781,6 +781,128 @@ def get_api_115_runtime_tuning() -> Dict[str, Any]:
         return dict(_api_115_runtime_tuning)
 
 
+_FALLBACK_PROVIDER_CONFIG_KEYS: Tuple[str, ...] = (
+    "cookie_115",
+    "cookie_quark",
+    "cookie_tianyi",
+    "tianyi_username",
+    "tianyi_password",
+    "123pan_username",
+    "123pan_password",
+    "aliyun_refresh_token",
+)
+
+
+_SETTINGS_CONFIG_KEY_ORDER_AFTER_AUTH: Tuple[str, ...] = (
+    # 1. 网盘认证与签到
+    "cookie_123pan",
+    "provider_enabled",
+    "default_magnet_provider",
+    "resource_favorite_dirs",
+    "sign115_enabled",
+    "sign115_cron_time",
+    # 2. 115 STRM 播放基础配置
+    "strm_proxy_base_url",
+    "api_115_rate_limit_seconds",
+    "api_115_list_cache_ttl_seconds",
+    "api_115_download_url_cache_ttl_seconds",
+    "extensions",
+    "strm_play_mode",
+    # 3. 目录树源配置
+    "trees",
+    # 4. 目录树同步策略与执行模式
+    "sync_mode",
+    "cron_hour",
+    "check_hash",
+    "sync_clean",
+    "last_hash",
+    # 5. TG 订阅源管理
+    "tg_channel_threads",
+    "tg_channel_sync_limit",
+    "resource_sources",
+    "resource_quick_links",
+    # 6. PanSou 盘搜
+    "pansou_enabled",
+    "pansou_base_url",
+    "pansou_username",
+    "pansou_password",
+    "pansou_token",
+    "pansou_src",
+    "pansou_channels",
+    "pansou_plugins",
+    # 7. 网络代理
+    "tg_proxy_enabled",
+    "tg_proxy_protocol",
+    "tg_proxy_host",
+    "tg_proxy_port",
+    # 8. TMDB 元数据增强
+    "tmdb_enabled",
+    "tmdb_api_key",
+    "tmdb_cache_ttl_hours",
+    "tmdb_language",
+    "tmdb_region",
+    # 9. 通知推送
+    "notify_push_enabled",
+    "notify_monitor_enabled",
+    "notify_channel",
+    "notify_wecom_webhook",
+    "notify_wecom_app_corp_id",
+    "notify_wecom_app_agent_id",
+    "notify_wecom_app_secret",
+    "notify_wecom_app_touser",
+    # 10. 后台安全管理
+    "username",
+    "password",
+    "webhook_secret",
+    # 其他页面维护的数据
+    "mount_points",
+    "monitor_tasks",
+    "subscription_tasks",
+)
+
+
+def _provider_config_key_order() -> List[str]:
+    keys: List[str] = []
+    seen: Set[str] = set()
+
+    def add(key: Any) -> None:
+        token = str(key or "").strip()
+        if token and token not in seen:
+            keys.append(token)
+            seen.add(token)
+
+    try:
+        from .providers.registry import list_all as _list_all_p
+        for provider in _list_all_p():
+            for config_key in getattr(provider, "config_keys", []) or []:
+                add(config_key)
+    except Exception:
+        pass
+
+    for config_key in _FALLBACK_PROVIDER_CONFIG_KEYS:
+        add(config_key)
+    return keys
+
+
+def order_config_for_save(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep settings.json readable by matching the settings page order."""
+    source = cfg if isinstance(cfg, dict) else {}
+    ordered: Dict[str, Any] = {}
+
+    def add(key: Any) -> None:
+        token = str(key or "").strip()
+        if token and token in source and token not in ordered:
+            ordered[token] = source[token]
+
+    for key in _provider_config_key_order():
+        add(key)
+    for key in _SETTINGS_CONFIG_KEY_ORDER_AFTER_AUTH:
+        add(key)
+    for key in sorted(str(key) for key in source.keys()):
+        add(key)
+    return ordered
+
+
 def default_config() -> Dict[str, Any]:
     return {
         "username": "admin",
@@ -792,6 +914,12 @@ def default_config() -> Dict[str, Any]:
         "api_115_download_url_cache_ttl_seconds": API_115_DOWNLOAD_URL_CACHE_TTL_SECONDS,
         "cookie_115": "",
         "cookie_quark": "",
+        "cookie_tianyi": "",
+        "tianyi_username": "",
+        "tianyi_password": "",
+        "123pan_username": "",
+        "123pan_password": "",
+        "aliyun_refresh_token": "",
         "provider_enabled": _build_provider_enabled_defaults(),
         "default_magnet_provider": "115",
         "sign115_enabled": False,
@@ -2096,6 +2224,12 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         merged["cookie_115"] = ""
     if "cookie_quark" not in merged:
         merged["cookie_quark"] = ""
+    if "cookie_tianyi" not in merged:
+        merged["cookie_tianyi"] = ""
+    if "tianyi_username" not in merged:
+        merged["tianyi_username"] = ""
+    if "tianyi_password" not in merged:
+        merged["tianyi_password"] = ""
     if "provider_enabled" not in merged:
         merged["provider_enabled"] = _build_provider_enabled_defaults()
     if "default_magnet_provider" not in merged:
@@ -2292,7 +2426,8 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         merged.get("tg_channel_sync_limit", TG_CHANNEL_SYNC_LIMIT_DEFAULT),
         fallback=TG_CHANNEL_SYNC_LIMIT_DEFAULT,
     )
-    return merged
+    merged["provider_enabled"] = normalize_provider_enabled_config(merged)
+    return order_config_for_save(merged)
 
 
 _config_store_lock = threading.Lock()
@@ -5477,6 +5612,7 @@ def _build_resource_state_payload_snapshot(
             },
             "provider_auth": clone_jsonable(provider_auth_configured),
             **provider_cookie_flags,
+            "default_magnet_provider": normalize_magnet_provider(cfg.get("default_magnet_provider", "115")),
             "cookie_health": build_cookie_health_payload(cfg),
         }
     tg_channel_sync_limit = get_tg_channel_sync_limit(cfg)
@@ -5511,6 +5647,7 @@ def _build_resource_state_payload_snapshot(
         "quark_cookie_configured": bool(str(cfg.get("cookie_quark", "")).strip()),
         "provider_auth": clone_jsonable(provider_auth_configured),
         **provider_cookie_flags,
+        "default_magnet_provider": normalize_magnet_provider(cfg.get("default_magnet_provider", "115")),
         "cookie_health": build_cookie_health_payload(cfg),
         "setup_status": {
             "strm_ready": bool(

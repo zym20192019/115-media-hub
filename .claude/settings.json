@@ -25,7 +25,10 @@
       "Bash(python -m json.tool)",
       "Bash(.venv/bin/python -m compileall app/core.py app/providers/tianyi.py app/providers/pan123.py app/providers/aliyun.py)",
       "Bash(cp -r doc/superpowers/plans/* docs/superpowers/plans/)",
-      "Bash(cp -r doc/superpowers/specs/* docs/superpowers/specs/)"
+      "Bash(cp -r doc/superpowers/specs/* docs/superpowers/specs/)",
+      "Bash(awk 'NR>1 && /^229[0-9]|^23[0-9][0-9]/')",
+      "Bash(awk -F: '$1 > 2295 && $1 < 2350')",
+      "Bash(awk '/^def normalize_config/{start=NR} start && /^def / && NR>start{print start\"-\"NR-1; exit}' /Users/xianer/Documents/code/115-media-hub/app/core.py)"
     ]
   }
 }

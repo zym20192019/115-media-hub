@@ -293,7 +293,9 @@ def verify_password(plain: str, stored: str) -> bool:
     try:
         if not stored.startswith("$pbkdf2$"):
             return hmac.compare_digest(plain, stored)
-        _, salt, expected_hex = stored.split("$", 2)
+        parts = stored.split("$")
+        salt = parts[2]
+        expected_hex = parts[3]
         dk = hashlib.pbkdf2_hmac("sha256", plain.encode("utf-8"), salt.encode("utf-8"), 200_000)
         return hmac.compare_digest(dk.hex(), expected_hex)
     except Exception:

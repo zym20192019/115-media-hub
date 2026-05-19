@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-19
+- 全局 API 认证中间件：所有接口（除登录、favicon、userscript）需登录后才能访问，未认证请求自动跳转登录页。
+- Session Secret Key 改为首次启动自动生成随机值并持久化，不再硬编码。
+- 登录密码改用 bcrypt 哈希存储和验证，替换明文比较。
+- 新增 CSRF 防护：所有 POST 请求需携带 CSRF Token，登出改为 POST 方法。
+- CORS 默认策略收紧：默认仅允许同源访问，需跨域时通过环境变量显式配置。
+- 登录失败限流：连续失败 5 次后锁定 5 分钟，防止暴力破解。
+- 修复数据库连接泄漏：所有 `open_db()` 调用统一使用 `try/finally` 确保连接关闭。
+- 修复并发竞态：共享集合（`resource_job_running` 等）和队列（`monitor_queue` 等）添加锁保护。
+- 修复 `ensure_db()` 双重检查锁定缺陷，DDL 操作移入锁内。
+- 关键异常处理补充日志：`except Exception: pass` 改为记录错误详情，便于排查。
+- 错误响应脱敏：`str(exc)` 不再直接返回客户端，改为返回通用错误信息。
+- 阿里云盘、天翼云盘、TMDB API 调用增加重试机制。
+
 ## [0.3.29] - 2026-05-16
 - 统一文件管理列表的表头与名称列对齐方式，修复资源目录、订阅保存目录、监控文件夹和刮削文件列表中的名称列居中或错位问题。
 - STRM 残留目录清理的目录列表去掉多余外框，并把滚动交给列表本身，避免弹窗内表格出现嵌套边框和内容裁切。

@@ -1,10 +1,10 @@
 {
-  "version": "0.3.29",
-  "buildDate": "2026-05-16T00:00:00+08:00",
+  "version": "0.4.0",
+  "buildDate": "2026-05-19T00:00:00+08:00",
   "notes": [
-    "更新版本号到 0.3.29",
-    "统一文件管理列表的表头与名称列左对齐，减少资源、订阅、监控等目录选择场景的视觉错位",
-    "刮削页选择状态改为只显示数量，并优化竖屏操作按钮布局，避免长状态和按钮在窄屏下裁切"
+    "安全加固：全局 API 认证中间件、Session Secret 动态生成、密码哈希存储",
+    "修复数据库连接泄漏、并发竞态、静默吞异常等稳定性问题",
+    "新增 CSRF 防护、CORS 收紧、登录失败限流等安全机制"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

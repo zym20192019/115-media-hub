@@ -239,6 +239,29 @@
             .rec-card-actions { padding: 0 0.875rem 0.875rem; }
             .rec-card-btn { font-size: 0.75rem; padding: 0.4375rem 0.5rem; }
         }
+        @media (max-width: 639.98px) {
+            /* Tab 栏横向滚动 */
+            .rec-tab-bar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+            .rec-tab-bar::-webkit-scrollbar { display: none; }
+            .rec-tab-btn { flex-shrink: 0; padding: 0.4rem 0.75rem; font-size: 0.75rem; }
+            /* 搜索栏堆叠 */
+            .rec-search-strip { flex-wrap: wrap; }
+            .rec-search-input-wrap { width: 100%; flex: none; order: -1; }
+            .rec-search-select { flex: 1; min-width: 0; }
+            .rec-search-btn { flex-shrink: 0; }
+            /* 筛选行堆叠 */
+            .rec-explore-row { flex-direction: column; align-items: stretch; }
+            .rec-explore-row > .rec-search-select,
+            .rec-explore-row > .rec-search-btn { width: 100%; }
+            /* 高级筛选 2 列网格 */
+            .rec-explore-row-advanced { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+            .rec-explore-row-advanced > *:first-child { grid-column: 1 / -1; }
+            /* 类型标签触控优化 */
+            .rec-genre-chip { padding: 0.375rem 0.875rem; font-size: 0.8125rem; }
+            /* 输入框全宽 */
+            .rec-input-sm { max-width: 100%; }
+            .rec-range-inputs { width: 100%; }
+        }
 
         /* ── Recommendation Tab Bar ── */
         .rec-tab-bar {

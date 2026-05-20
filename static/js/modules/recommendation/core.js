@@ -751,6 +751,17 @@ function getSelectedExploreGenres() {
     return Array.from(chips).map(function(c) { return c.dataset.genreId; }).filter(Boolean).join(',');
 }
 
+function renderDecadeChips() {
+    var container = document.getElementById('rec-explore-decade-chips');
+    if (!container) return;
+    var currentDecade = Math.floor(new Date().getFullYear() / 10) * 10;
+    var html = '';
+    for (var d = currentDecade; d >= 1950; d -= 10) {
+        html += '<button type="button" class="rec-genre-chip" data-decade="' + d + '" onclick="selectDecade(this)">' + d + 's</button>';
+    }
+    container.innerHTML = html;
+}
+
 function selectDecade(btn) {
     const container = document.getElementById('rec-explore-decade-chips');
     if (!container) return;
@@ -879,6 +890,7 @@ async function searchRecommendationDiscover(page) {
 }
 
 async function initRecommendationPage() {
+    renderDecadeChips();
     await loadRecommendationWatchlist();
     if (!recommendationItems.length) {
         await loadRecommendationTrending('week');

@@ -17,12 +17,13 @@
                         <span class="text-xs text-slate-500">频道 ID</span>
                         <input id="resource_source_channel" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-1" placeholder="例如：QukanMovie">
                     </label>
-                    <label class="ui-switch-field">
-                        <span class="text-sm text-slate-200">启用频道</span>
-                        <span class="ui-switch">
-                            <input type="checkbox" id="resource_source_enabled" checked>
-                            <span class="ui-switch-slider"></span>
-                        </span>
+                    <label class="block">
+                        <span class="text-xs text-slate-500">频道用途</span>
+                        <select id="resource_source_usage" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-1">
+                            <option value="off">关闭</option>
+                            <option value="search_only">仅搜索</option>
+                            <option value="sync_search" selected>同步+搜索</option>
+                        </select>
                     </label>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
                         <button id="resource-source-modal-save-btn" onclick="saveResourceSource()" class="resource-source-modal-action-btn resource-source-modal-action-btn-primary">保存频道订阅</button>
@@ -38,7 +39,7 @@
                     <div class="min-w-0">
                         <div class="resource-source-modal-eyebrow">Quick Manage</div>
                         <div id="resource-channel-manage-title" class="resource-source-modal-title">频道快捷管理</div>
-                        <div class="resource-source-modal-subtitle">只保留高频操作：启用/停用、改名、置顶（排序挪到 1 号）。</div>
+                        <div class="resource-source-modal-subtitle">只保留高频操作：频道用途、改名、置顶（排序挪到 1 号）。</div>
                     </div>
                     <button type="button" class="resource-source-modal-close" onclick="closeResourceChannelManageModal()" aria-label="关闭频道快捷管理弹窗">✕</button>
                 </div>
@@ -47,12 +48,13 @@
                         <span class="text-xs text-slate-500">频道名称</span>
                         <input id="resource-channel-manage-name" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-1" placeholder="请输入频道名称">
                     </label>
-                    <label class="ui-switch-field">
-                        <span class="text-sm text-slate-200">启用频道</span>
-                        <span class="ui-switch">
-                            <input type="checkbox" id="resource-channel-manage-enabled" checked>
-                            <span class="ui-switch-slider"></span>
-                        </span>
+                    <label class="block">
+                        <span class="text-xs text-slate-500">频道用途</span>
+                        <select id="resource-channel-manage-usage" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm mt-1">
+                            <option value="off">关闭</option>
+                            <option value="search_only">仅搜索</option>
+                            <option value="sync_search" selected>同步+搜索</option>
+                        </select>
                     </label>
                     <div class="resource-channel-manage-meta">当前排序：<span id="resource-channel-manage-order">--</span></div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
@@ -71,7 +73,7 @@
                     <div class="min-w-0">
                         <div class="resource-source-modal-eyebrow">Import / Export</div>
                         <div class="resource-source-modal-title">导入频道订阅模板</div>
-                        <div class="resource-source-modal-subtitle">粘贴后会自动识别格式：支持盘搜 `CHANNELS=a,b,c` / Docker 环境变量模板，也支持 CloudSaver `[{"name":"频道名","id":"频道ID"}]`。</div>
+                        <div class="resource-source-modal-subtitle">粘贴后会自动识别格式：支持盘搜 `CHANNELS=a,b,c` / Docker 环境变量模板，也支持 MediaHub/CloudSaver `[{"name":"频道名","id":"频道ID"}]`。</div>
                     </div>
                     <button type="button" class="resource-source-modal-close" onclick="closeResourceSourceImportModal()" aria-label="关闭频道导入弹窗">✕</button>
                 </div>
@@ -98,7 +100,7 @@
                     <div class="min-w-0">
                         <div class="resource-source-modal-eyebrow">Export</div>
                         <div class="resource-source-modal-title">导出频道订阅</div>
-                        <div id="resource-source-export-subtitle" class="resource-source-modal-subtitle">导出内容使用 CloudSaver JSON 格式；盘搜 CHANNELS 只在导入时兼容。</div>
+                        <div id="resource-source-export-subtitle" class="resource-source-modal-subtitle">导出内容使用 MediaHub JSON 格式并保留频道用途；盘搜 CHANNELS 只在导入时兼容。</div>
                     </div>
                     <button type="button" class="resource-source-modal-close" onclick="closeResourceSourceExportModal()" aria-label="关闭频道导出弹窗">✕</button>
                 </div>
@@ -166,7 +168,7 @@
                                 <div id="resource-source-manager-type-filters" class="resource-source-manager-filter-tabs"></div>
                             </div>
                             <div class="resource-source-manager-filter-block">
-                                <div class="resource-source-manager-filter-label">启用状态</div>
+                            <div class="resource-source-manager-filter-label">频道用途</div>
                                 <div id="resource-source-manager-status-filters" class="resource-source-manager-filter-tabs"></div>
                             </div>
                             <div class="resource-source-manager-filter-block">
@@ -203,8 +205,9 @@
                                 <button id="resource-source-manager-sync-names-btn" type="button" onclick="syncSelectedResourceSourceNames()" class="resource-source-secondary-btn">同步频道名称</button>
                                 <button type="button" onclick="bulkMoveResourceSources('top')" class="resource-source-secondary-btn">置顶选中</button>
                                 <button type="button" onclick="bulkMoveResourceSources('bottom')" class="resource-source-secondary-btn">置底选中</button>
-                                <button type="button" onclick="bulkEnableResourceSources(true)" class="resource-source-manager-primary-btn">启用选中</button>
-                                <button type="button" onclick="bulkEnableResourceSources(false)" class="resource-source-secondary-btn">停用选中</button>
+                                <button type="button" onclick="bulkSetResourceSourceUsage('off')" class="resource-source-secondary-btn">设为关闭</button>
+                                <button type="button" onclick="bulkSetResourceSourceUsage('search_only')" class="resource-source-secondary-btn">设为仅搜索</button>
+                                <button type="button" onclick="bulkSetResourceSourceUsage('sync_search')" class="resource-source-manager-primary-btn">设为同步+搜索</button>
                                 <button type="button" onclick="bulkDeleteResourceSources()" class="resource-source-manager-danger-btn">删除选中</button>
                             </div>
                         </div>

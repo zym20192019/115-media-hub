@@ -1,8 +1,8 @@
 {
-  "version": "0.4.2",
-  "buildDate": "2026-05-20T00:00:00+08:00",
+  "version": "0.4.3",
+  "buildDate": "2026-05-21T00:00:00+08:00",
   "notes": [
-    "重构资源推荐页筛选与推荐卡片布局，优化移动端体验并统一卡片高度"
+    "资源频道用途改为关闭、仅搜索、同步加搜索三态，并优化资源页统计与移动端导入按钮文案"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

@@ -3526,7 +3526,8 @@
             align-items: center;
         }
         .resource-source-manager-search,
-        .resource-source-manager-sort {
+        .resource-source-manager-sort,
+        .resource-source-usage-select {
             min-height: 38px;
             border-radius: 0.8rem;
             border: 1px solid rgba(71, 85, 105, 0.8);
@@ -3540,6 +3541,11 @@
         }
         .resource-source-manager-sort {
             min-width: 10.6rem;
+        }
+        .resource-source-usage-select {
+            min-width: 8.5rem;
+            max-width: 10rem;
+            font-weight: 700;
         }
         .resource-source-manager-bulk-meta {
             font-size: 0.72rem;
@@ -7866,6 +7872,7 @@
         html.theme-day .resource-source-manager-filter-tab,
         html.theme-day .resource-source-manager-select,
         html.theme-day .resource-source-manager-sort,
+        html.theme-day .resource-source-usage-select,
         html.theme-day .resource-source-manager-test-sample,
         html.theme-day .resource-source-manager-test-sample input,
         html.theme-day .resource-source-manager-danger-btn {
@@ -10759,6 +10766,7 @@
         html:not(.theme-day) textarea,
         html:not(.theme-day) .resource-source-manager-search,
         html:not(.theme-day) .resource-source-manager-sort,
+        html:not(.theme-day) .resource-source-usage-select,
         html:not(.theme-day) .subscription-link-scan-input,
         html:not(.theme-day) .resource-share-search-input,
         html:not(.theme-day) .resource-quick-link-input {
@@ -10784,6 +10792,7 @@
         html:not(.theme-day) textarea:hover,
         html:not(.theme-day) .resource-source-manager-search:hover,
         html:not(.theme-day) .resource-source-manager-sort:hover,
+        html:not(.theme-day) .resource-source-usage-select:hover,
         html:not(.theme-day) .subscription-link-scan-input:hover,
         html:not(.theme-day) .resource-share-search-input:hover,
         html:not(.theme-day) .resource-quick-link-input:hover {
@@ -10795,6 +10804,7 @@
         html:not(.theme-day) textarea:focus,
         html:not(.theme-day) .resource-source-manager-search:focus,
         html:not(.theme-day) .resource-source-manager-sort:focus,
+        html:not(.theme-day) .resource-source-usage-select:focus,
         html:not(.theme-day) .subscription-link-scan-input:focus,
         html:not(.theme-day) .resource-share-search-input:focus,
         html:not(.theme-day) .resource-quick-link-input:focus {

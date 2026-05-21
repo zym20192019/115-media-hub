@@ -978,8 +978,12 @@ def _load_subscription_cached_search_items(
     provider = normalize_subscription_provider(task.get("provider", "115"), fallback="115")
 
     cfg = get_config()
-    sources = [normalize_resource_source(source or {}) for source in cfg.get("resource_sources", []) if source.get("enabled")]
-    enabled_channel_ids = list_enabled_resource_channel_ids(sources)
+    sources = [
+        source
+        for source in (normalize_resource_source(raw_source or {}) for raw_source in cfg.get("resource_sources", []))
+        if is_resource_source_search_enabled(source)
+    ]
+    searchable_channel_ids = list_search_resource_channel_ids(sources)
     search_terms: List[str] = []
     search_terms.extend([str(keyword or "").strip() for keyword in keywords if str(keyword or "").strip()])
     for value in [
@@ -1021,7 +1025,7 @@ def _load_subscription_cached_search_items(
                 channel_id = normalize_telegram_channel_id_from_input(
                     item.get("channel_name", "") or item.get("source_name", "")
                 )
-                if not channel_id or channel_id not in enabled_channel_ids:
+                if not channel_id or channel_id not in searchable_channel_ids:
                     continue
             if not resource_item_matches_search(item, term):
                 continue

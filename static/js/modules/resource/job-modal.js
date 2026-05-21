@@ -188,7 +188,7 @@
             if (filter === 'submitted') return '当前没有等待刷新生成 strm 的任务。';
             if (filter === 'completed') return '当前没有已完成的导入记录。';
             if (filter === 'failed') return '当前没有失败任务。';
-            return '还没有导入任务，资源卡片里的“下载到 115 / 转存到 115”会在这里留下记录。';
+            return '还没有导入任务，资源卡片里的“下载 / 转存”会在这里留下记录。';
         }
 
         function getScraperJobEmptyText(filter = 'all') {

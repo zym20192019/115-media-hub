@@ -1053,6 +1053,56 @@ def normalize_bool(value: Any, default: bool = False) -> bool:
     return bool(value)
 
 
+RESOURCE_SOURCE_USAGE_OFF = "off"
+RESOURCE_SOURCE_USAGE_SEARCH_ONLY = "search_only"
+RESOURCE_SOURCE_USAGE_SYNC_SEARCH = "sync_search"
+RESOURCE_SOURCE_USAGE_VALUES = {
+    RESOURCE_SOURCE_USAGE_OFF,
+    RESOURCE_SOURCE_USAGE_SEARCH_ONLY,
+    RESOURCE_SOURCE_USAGE_SYNC_SEARCH,
+}
+
+
+def normalize_resource_source_usage(source: Dict[str, Any]) -> str:
+    payload = source if isinstance(source, dict) else {}
+    raw_usage = str(payload.get("usage", "") or "").strip().lower().replace("-", "_")
+    if raw_usage in {"off", "disabled", "disable", "closed", "close", "none", "false", "0"}:
+        return RESOURCE_SOURCE_USAGE_OFF
+    if raw_usage in {"search", "search_only", "only_search", "searchonly"}:
+        return RESOURCE_SOURCE_USAGE_SEARCH_ONLY
+    if raw_usage in {"sync_search", "sync_and_search", "search_sync", "sync", "enabled", "enable", "on", "true", "1", "all"}:
+        return RESOURCE_SOURCE_USAGE_SYNC_SEARCH
+
+    if "sync_enabled" in payload or "search_enabled" in payload:
+        sync_enabled = normalize_bool(payload.get("sync_enabled", False), default=False)
+        search_enabled = normalize_bool(payload.get("search_enabled", sync_enabled), default=sync_enabled)
+        if sync_enabled:
+            return RESOURCE_SOURCE_USAGE_SYNC_SEARCH
+        if search_enabled:
+            return RESOURCE_SOURCE_USAGE_SEARCH_ONLY
+        return RESOURCE_SOURCE_USAGE_OFF
+
+    if "enabled" in payload:
+        return (
+            RESOURCE_SOURCE_USAGE_SYNC_SEARCH
+            if normalize_bool(payload.get("enabled", True), default=True)
+            else RESOURCE_SOURCE_USAGE_OFF
+        )
+
+    return RESOURCE_SOURCE_USAGE_SYNC_SEARCH
+
+
+def is_resource_source_sync_enabled(source: Dict[str, Any]) -> bool:
+    return normalize_resource_source_usage(source or {}) == RESOURCE_SOURCE_USAGE_SYNC_SEARCH
+
+
+def is_resource_source_search_enabled(source: Dict[str, Any]) -> bool:
+    return normalize_resource_source_usage(source or {}) in {
+        RESOURCE_SOURCE_USAGE_SEARCH_ONLY,
+        RESOURCE_SOURCE_USAGE_SYNC_SEARCH,
+    }
+
+
 def normalize_task(task: Dict[str, Any]) -> Dict[str, Any]:
     name = str(task.get("name", "")).strip()
     retries = int(task.get("retries", 3) or 3)
@@ -1959,19 +2009,26 @@ def normalize_subscription_task(task: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def normalize_resource_source(source: Dict[str, Any]) -> Dict[str, Any]:
-    name = str(source.get("name", "")).strip()
-    raw_channel_id = str(source.get("channel_id", "") or source.get("channel", "") or source.get("id", "")).strip()
-    url = str(source.get("url", "")).strip()
-    notes = str(source.get("notes", "")).strip()
+    payload = source if isinstance(source, dict) else {}
+    name = str(payload.get("name", "")).strip()
+    raw_channel_id = str(payload.get("channel_id", "") or payload.get("channel", "") or payload.get("id", "")).strip()
+    url = str(payload.get("url", "")).strip()
+    notes = str(payload.get("notes", "")).strip()
     channel_id = raw_channel_id.lstrip("@")
     if not channel_id and url:
         channel_id = normalize_telegram_channel_id_from_input(url)
+    usage = normalize_resource_source_usage(payload)
+    sync_enabled = usage == RESOURCE_SOURCE_USAGE_SYNC_SEARCH
+    search_enabled = usage in {RESOURCE_SOURCE_USAGE_SEARCH_ONLY, RESOURCE_SOURCE_USAGE_SYNC_SEARCH}
     return {
         "name": name or channel_id or url or "未命名频道",
         "channel_id": channel_id,
         "url": build_telegram_channel_url(channel_id) if channel_id else url,
         "notes": notes,
-        "enabled": normalize_bool(source.get("enabled", True), default=True),
+        "usage": usage,
+        "enabled": search_enabled,
+        "sync_enabled": sync_enabled,
+        "search_enabled": search_enabled,
     }
 
 
@@ -2710,15 +2767,30 @@ def delete_resource_items_by_ids(conn: sqlite3.Connection, item_ids: List[int], 
     return deleted
 
 
-def list_enabled_resource_channel_ids(sources: List[Dict[str, Any]]) -> Set[str]:
+def list_sync_resource_channel_ids(sources: List[Dict[str, Any]]) -> Set[str]:
     channel_ids: Set[str] = set()
     for source in sources or []:
-        if not source.get("enabled", True):
+        if not is_resource_source_sync_enabled(source or {}):
             continue
         channel_id = normalize_telegram_channel_id_from_input(source.get("channel_id", ""))
         if channel_id:
             channel_ids.add(channel_id)
     return channel_ids
+
+
+def list_search_resource_channel_ids(sources: List[Dict[str, Any]]) -> Set[str]:
+    channel_ids: Set[str] = set()
+    for source in sources or []:
+        if not is_resource_source_search_enabled(source or {}):
+            continue
+        channel_id = normalize_telegram_channel_id_from_input(source.get("channel_id", ""))
+        if channel_id:
+            channel_ids.add(channel_id)
+    return channel_ids
+
+
+def list_enabled_resource_channel_ids(sources: List[Dict[str, Any]]) -> Set[str]:
+    return list_sync_resource_channel_ids(sources)
 
 
 def prune_resource_inactive_channel_cache(
@@ -2829,7 +2901,7 @@ def run_resource_cache_governance(
     sources: List[Dict[str, Any]],
     active_min_keep: int = RESOURCE_CHANNEL_CACHE_ACTIVE_MIN_KEEP,
 ) -> Dict[str, int]:
-    active_channel_ids = list_enabled_resource_channel_ids(sources or [])
+    active_channel_ids = list_sync_resource_channel_ids(sources or [])
     inactive_pruned = prune_resource_inactive_channel_cache(conn, active_channel_ids, RESOURCE_CHANNEL_INACTIVE_CACHE_LIMIT)
     expired_pruned = prune_resource_cache_by_age(conn, RESOURCE_CHANNEL_CACHE_TTL_DAYS)
     protected_keep = max(0, int(active_min_keep or RESOURCE_CHANNEL_CACHE_ACTIVE_MIN_KEEP))
@@ -2987,11 +3059,14 @@ def build_resource_channel_sections(
         channel_ids = [
             normalize_telegram_channel_id_from_input((source or {}).get("channel_id", ""))
             for source in (sources or [])
-            if isinstance(source, dict)
+            if isinstance(source, dict) and is_resource_source_sync_enabled(source)
         ]
         sample_limit = max(per_channel, RESOURCE_CHANNEL_TYPE_SAMPLE_SIZE)
         batch_channel_items, batch_channel_counts = list_resource_channel_items(channel_ids, limit_per_channel=sample_limit)
-    for source in sources:
+    for raw_source in sources:
+        source = normalize_resource_source(raw_source or {})
+        if not is_resource_source_sync_enabled(source):
+            continue
         channel_id = normalize_telegram_channel_id_from_input(source.get("channel_id", ""))
         if not channel_id:
             continue
@@ -3027,7 +3102,10 @@ def build_resource_channel_sections(
                 "name": source.get("name", channel_id),
                 "channel_id": channel_id,
                 "url": build_telegram_channel_url(channel_id),
-                "enabled": bool(source.get("enabled", True)),
+                "usage": source.get("usage", RESOURCE_SOURCE_USAGE_SYNC_SEARCH),
+                "enabled": bool(source.get("search_enabled", True)),
+                "sync_enabled": bool(source.get("sync_enabled", True)),
+                "search_enabled": bool(source.get("search_enabled", True)),
                 "last_sync_at": resource_channel_last_sync.get(channel_id, 0.0),
                 "last_error": resource_channel_last_error.get(channel_id, ""),
                 "item_count": item_count,
@@ -3207,7 +3285,11 @@ async def search_resource_sources(
                 continue
             normalized_incremental_cursors[channel_id] = max(0, int(raw_cursor or 0))
     cfg = get_config()
-    sources = [normalize_resource_source(source or {}) for source in cfg.get("resource_sources", []) if source.get("enabled")]
+    sources = [
+        source
+        for source in (normalize_resource_source(raw_source or {}) for raw_source in cfg.get("resource_sources", []))
+        if is_resource_source_search_enabled(source)
+    ]
     tg_channel_threads = get_tg_channel_threads(cfg)
     if not query or not sources:
         return {
@@ -3346,7 +3428,10 @@ async def search_resource_sources(
                     "name": source_name,
                     "channel_id": channel_id,
                     "url": build_telegram_channel_url(channel_id),
+                    "usage": source.get("usage", RESOURCE_SOURCE_USAGE_SYNC_SEARCH),
                     "enabled": True,
+                    "sync_enabled": bool(source.get("sync_enabled", False)),
+                    "search_enabled": True,
                     "items": channel_items,
                     "item_count": len(channel_items),
                     "next_before": str(result.get("next_before", "") or "").strip(),
@@ -5675,8 +5760,10 @@ def _build_resource_state_payload_snapshot(
     active_job_count = int(stats_payload.get("active_job_count", 0) or 0)
     completed_job_count = int(stats_payload.get("completed_job_count", 0) or 0)
     failed_job_count = int(stats_payload.get("failed_job_count", 0) or 0)
-    sources = cfg.get("resource_sources", [])
-    enabled_sources = [source for source in sources if source.get("enabled")]
+    sources = [normalize_resource_source(source or {}) for source in cfg.get("resource_sources", [])]
+    sync_sources = [source for source in sources if is_resource_source_sync_enabled(source)]
+    search_sources = [source for source in sources if is_resource_source_search_enabled(source)]
+    off_sources = [source for source in sources if not is_resource_source_search_enabled(source)]
     provider_auth_configured: Dict[str, bool] = {}
     try:
         for p in list_all():
@@ -5698,7 +5785,11 @@ def _build_resource_state_payload_snapshot(
             "pagination": clone_jsonable(job_pagination),
             "channel_sync": build_resource_channel_sync_payload(),
             "stats": {
-                "source_count": len(enabled_sources),
+                "source_count": len(sync_sources),
+                "total_source_count": len(sources),
+                "sync_source_count": len(sync_sources),
+                "search_source_count": len(search_sources),
+                "disabled_source_count": len(off_sources),
                 "item_count": total_item_count,
                 "total_job_count": total_job_count,
                 "active_job_count": active_job_count,
@@ -5711,7 +5802,7 @@ def _build_resource_state_payload_snapshot(
                 ),
                 "cookie_configured": bool(str(cfg.get("cookie_115", "")).strip()),
                 "quark_cookie_configured": bool(str(cfg.get("cookie_quark", "")).strip()),
-                "has_sources": bool(enabled_sources),
+                "has_sources": bool(sync_sources),
                 "has_monitor": bool(cfg.get("monitor_tasks", [])),
                 "has_resource_data": total_item_count > 0,
                 "has_jobs": total_job_count > 0,
@@ -5729,7 +5820,7 @@ def _build_resource_state_payload_snapshot(
     ]
     channel_ids = [channel_id for channel_id in channel_ids if channel_id]
     subscription_channel_support = load_subscription_channel_support_stats(channel_ids)
-    channel_sections = build_resource_channel_sections(sources, per_channel=tg_channel_sync_limit)
+    channel_sections = build_resource_channel_sections(sync_sources, per_channel=tg_channel_sync_limit)
     channel_sections = filter_resource_sections_by_provider(channel_sections, normalized_provider_filter, drop_empty=normalized_provider_filter != "all")
     search_sections = filter_resource_sections_by_provider(search_sections, normalized_provider_filter, drop_empty=True)
     items = filter_resource_items_by_provider(items, normalized_provider_filter)
@@ -5761,7 +5852,7 @@ def _build_resource_state_payload_snapshot(
             ),
             "cookie_configured": bool(str(cfg.get("cookie_115", "")).strip()),
             "quark_cookie_configured": bool(str(cfg.get("cookie_quark", "")).strip()),
-            "has_sources": bool(enabled_sources),
+            "has_sources": bool(sync_sources),
             "has_monitor": bool(cfg.get("monitor_tasks", [])),
             "has_resource_data": total_item_count > 0,
             "has_jobs": total_job_count > 0,
@@ -5791,7 +5882,11 @@ def _build_resource_state_payload_snapshot(
             }
         ),
         "stats": {
-            "source_count": len(enabled_sources),
+            "source_count": len(sync_sources),
+            "total_source_count": len(sources),
+            "sync_source_count": len(sync_sources),
+            "search_source_count": len(search_sources),
+            "disabled_source_count": len(off_sources),
             "item_count": total_item_count,
             "filtered_item_count": filtered_item_count,
             "total_job_count": total_job_count,
@@ -5855,7 +5950,11 @@ async def build_resource_state_payload(
                 "items": [],
                 "sections": [],
                 "errors": [],
-                "searched_sources": len([source for source in cfg.get("resource_sources", []) if source.get("enabled")]),
+                "searched_sources": len([
+                    source
+                    for source in (normalize_resource_source(raw_source or {}) for raw_source in cfg.get("resource_sources", []))
+                    if is_resource_source_search_enabled(source)
+                ]),
                 "matched_channels": 0,
                 "pages_scanned": 0,
             }
@@ -5897,7 +5996,11 @@ async def sync_telegram_channels(force: bool = False, limit_per_channel: Optiona
         limit_per_channel,
         fallback=get_tg_channel_sync_limit(cfg),
     )
-    sources = [source for source in cfg.get("resource_sources", []) if source.get("enabled")]
+    sources = [
+        source
+        for source in (normalize_resource_source(raw_source or {}) for raw_source in cfg.get("resource_sources", []))
+        if is_resource_source_sync_enabled(source)
+    ]
     if not sources:
         ensure_db()
         conn = open_db()

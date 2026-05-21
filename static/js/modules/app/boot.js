@@ -340,6 +340,15 @@
                 if (!ok) toggle.checked = !toggle.checked;
             });
         });
+        document.getElementById('resource-source-manager-list')?.addEventListener('change', async (e) => {
+            const select = e.target.closest('[data-resource-source-usage-select]');
+            if (!select) return;
+            const index = parseInt(select.dataset.sourceIndex || '-1', 10);
+            if (index < 0) return;
+            const previousUsage = normalizeResourceSourceUsage((resourceState.sources || [])[index] || {});
+            const ok = await setResourceSourceUsage(index, select.value || 'sync_search');
+            if (!ok) select.value = previousUsage;
+        });
         document.getElementById('resource-source-manager-type-filters')?.addEventListener('click', (e) => {
             const btn = e.target.closest('[data-resource-source-manager-filter="type"]');
             if (!btn) return;
@@ -395,11 +404,6 @@
             if (action === 'edit') {
                 closeResourceSourceManagerModal();
                 openResourceSourceModal(index);
-                return;
-            }
-            if (action === 'toggle') {
-                const enabled = String(btn.dataset.enabled || '0') === '1';
-                void toggleResourceSourceEnabled(index, !enabled);
                 return;
             }
             if (action === 'move-up') {
@@ -627,7 +631,7 @@
         document.getElementById('resource-channel-manage-name')?.addEventListener('input', () => {
             if (resourceChannelManageModalOpen) resourceChannelManageDirty = true;
         });
-        document.getElementById('resource-channel-manage-enabled')?.addEventListener('change', () => {
+        document.getElementById('resource-channel-manage-usage')?.addEventListener('change', () => {
             if (resourceChannelManageModalOpen) resourceChannelManageDirty = true;
         });
         document.getElementById('resource-source-import-modal')?.addEventListener('click', (e) => {

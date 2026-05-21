@@ -120,6 +120,55 @@
             return normalizeTelegramChannelIdInput(source?.channel_id || source?.channel || '');
         }
 
+        function normalizeResourceSourceUsage(source) {
+            const rawSource = source && typeof source === 'object' ? source : {};
+            const rawUsage = String(rawSource.usage || '').trim().toLowerCase().replace(/-/g, '_');
+            if (['off', 'disabled', 'disable', 'closed', 'close', 'none', 'false', '0'].includes(rawUsage)) return 'off';
+            if (['search', 'search_only', 'only_search', 'searchonly'].includes(rawUsage)) return 'search_only';
+            if (['sync_search', 'sync_and_search', 'search_sync', 'sync', 'enabled', 'enable', 'on', 'true', '1', 'all'].includes(rawUsage)) return 'sync_search';
+
+            if (Object.prototype.hasOwnProperty.call(rawSource, 'sync_enabled') || Object.prototype.hasOwnProperty.call(rawSource, 'search_enabled')) {
+                const syncEnabled = rawSource.sync_enabled === true;
+                const searchEnabled = Object.prototype.hasOwnProperty.call(rawSource, 'search_enabled')
+                    ? rawSource.search_enabled === true
+                    : syncEnabled;
+                if (syncEnabled) return 'sync_search';
+                if (searchEnabled) return 'search_only';
+                return 'off';
+            }
+
+            if (Object.prototype.hasOwnProperty.call(rawSource, 'enabled')) {
+                return rawSource.enabled === false ? 'off' : 'sync_search';
+            }
+            return 'sync_search';
+        }
+
+        function isResourceSourceSyncEnabled(source) {
+            return normalizeResourceSourceUsage(source) === 'sync_search';
+        }
+
+        function isResourceSourceSearchEnabled(source) {
+            return ['search_only', 'sync_search'].includes(normalizeResourceSourceUsage(source));
+        }
+
+        function getResourceSourceUsageLabel(sourceOrUsage) {
+            const usage = typeof sourceOrUsage === 'string'
+                ? normalizeResourceSourceUsage({ usage: sourceOrUsage })
+                : normalizeResourceSourceUsage(sourceOrUsage);
+            if (usage === 'off') return '关闭';
+            if (usage === 'search_only') return '仅搜索';
+            return '同步+搜索';
+        }
+
+        function getResourceSourceUsageBadgeClass(sourceOrUsage) {
+            const usage = typeof sourceOrUsage === 'string'
+                ? normalizeResourceSourceUsage({ usage: sourceOrUsage })
+                : normalizeResourceSourceUsage(sourceOrUsage);
+            if (usage === 'off') return 'bg-slate-700 text-slate-300 border border-slate-600';
+            if (usage === 'search_only') return 'bg-sky-500/10 text-sky-300 border border-sky-500/20';
+            return 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20';
+        }
+
         function isLikelyTelegramChannelId(channelId) {
             return /^[A-Za-z0-9_]{5,32}$/.test(String(channelId || '').trim());
         }
@@ -129,7 +178,7 @@
         }
 
         function getEnabledResourceSources() {
-            return getResourceSourcesForSelect().filter(source => source.enabled !== false && getResourceSourceChannelId(source));
+            return getResourceSourcesForSelect().filter(source => isResourceSourceSearchEnabled(source) && getResourceSourceChannelId(source));
         }
 
         function getProviderMeta() {
@@ -1132,10 +1181,9 @@
         function getResourceImportLabel(item) {
             const linkType = getEffectiveResourceLinkType(item);
             if (!String(item?.link_url || '').trim()) return '暂无可导入链接';
-            if (isResourceShareLinkType(linkType)) return `转存到${getResourceProviderLabel(getResourceProviderByLinkType(linkType))}`;
+            if (isResourceShareLinkType(linkType)) return '转存';
             if (linkType === 'magnet') {
-                const p = getProviderByName(getResourceSelectedMagnetProvider());
-                return '下载到 ' + (p ? p.label : '115网盘');
+                return '下载';
             }
             return '当前不可导入';
         }
@@ -1347,7 +1395,8 @@
             return changed ? nextSections : sections;
         }
 
-        function syncResourceSectionsWithSources(sections, sources) {
+        function syncResourceSectionsWithSources(sections, sources, options = {}) {
+            const usageMode = String(options?.usageMode || 'search').trim().toLowerCase() === 'sync' ? 'sync' : 'search';
             const sourceIndex = new Map();
             (Array.isArray(sources) ? sources : []).forEach(source => {
                 const channelId = typeof getResourceSourceChannelId === 'function'
@@ -1377,7 +1426,12 @@
                         name: source.name || section?.name || channelId,
                         channel_id: channelId,
                         url: source.url || section?.url || '',
-                        enabled: source.enabled !== false
+                        usage: normalizeResourceSourceUsage(source),
+                        enabled: usageMode === 'sync'
+                            ? isResourceSourceSyncEnabled(source)
+                            : isResourceSourceSearchEnabled(source),
+                        sync_enabled: isResourceSourceSyncEnabled(source),
+                        search_enabled: isResourceSourceSearchEnabled(source)
                     };
                 })
                 .filter(Boolean);
@@ -1679,7 +1733,7 @@
             const current = select.value || '__manual__';
             const options = ['<option value="__manual__">手动录入 / 未绑定频道</option>']
                 .concat(getResourceSourcesForSelect().map((source, index) => {
-                    const label = `${source.name || `频道 ${index + 1}`}${source.enabled ? '' : ' (停用)'}`;
+                    const label = `${source.name || `频道 ${index + 1}`} (${getResourceSourceUsageLabel(source)})`;
                     return `<option value="${escapeHtml(source.name || '')}">${escapeHtml(label)}</option>`;
                 }));
             select.innerHTML = options.join('');
@@ -2201,7 +2255,7 @@
                 <div class="resource-overview-divider">
                     <div>
                         <div class="resource-overview-title">频道资源概览</div>
-                        <div class="resource-overview-copy">来自已启用频道的本地缓存，不是盘搜结果。</div>
+                        <div class="resource-overview-copy">来自同步+搜索频道的本地缓存，不是盘搜结果。</div>
                     </div>
                 </div>
             `;
@@ -2236,7 +2290,7 @@
                 if (!searchSections.length) {
                     const emptyCopy = normalizeResourceSearchSource(resourceState.search_source || resourceSearchSource) === 'pansou'
                         ? '盘搜没有返回当前类型的可导入结果。请检查 PanSou 配置，或换一个关键词再试。'
-                        : '没有在已启用订阅频道里找到匹配内容。可以先同步频道，或直接粘贴 magnet / 常见网盘分享链接进入识别。';
+                        : '没有在参与搜索的订阅频道里找到匹配内容。可以调整频道用途，或直接粘贴 magnet / 常见网盘分享链接进入识别。';
                     setResourceBoardHtml(container, `<div class="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-slate-400 text-sm">${escapeHtml(emptyCopy)}</div>`);
                     renderResourceBoardHint();
                     return;
@@ -2301,6 +2355,33 @@
             renderHeavyResourceSurfaces();
         }
 
+        function normalizeResourceStatCount(value, fallback = 0) {
+            const parsed = Number(value);
+            if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+            const fallbackParsed = Number(fallback);
+            return Number.isFinite(fallbackParsed) && fallbackParsed >= 0 ? fallbackParsed : 0;
+        }
+
+        function renderResourceSourceStats() {
+            const stats = resourceState.stats || {};
+            const meta = resourceState.search_meta && typeof resourceState.search_meta === 'object'
+                ? resourceState.search_meta
+                : {};
+            const isSearchMode = !!String(resourceState.search || '').trim();
+            const labelEl = document.getElementById('resource-source-count-label');
+            const countEl = document.getElementById('resource-source-count');
+            const itemCountEl = document.getElementById('resource-item-count');
+            if (labelEl) labelEl.innerText = isSearchMode ? '搜索源' : '同步源';
+            if (countEl) {
+                const hasSearchedSources = Object.prototype.hasOwnProperty.call(meta, 'searched_sources');
+                const rawCount = isSearchMode
+                    ? (hasSearchedSources ? meta.searched_sources : (stats.search_source_count ?? stats.source_count ?? resourceState.sources.length ?? 0))
+                    : (stats.sync_source_count ?? stats.source_count ?? resourceState.sources.length ?? 0);
+                countEl.innerText = String(normalizeResourceStatCount(rawCount));
+            }
+            if (itemCountEl) itemCountEl.innerText = String(normalizeResourceStatCount(stats.item_count));
+        }
+
         function applyResourceSourcesLocal(sources, options = {}) {
             const nextSources = Array.isArray(sources) ? sources : [];
             resourceState = {
@@ -2308,16 +2389,19 @@
                 sources: nextSources,
                 stats: {
                     ...(resourceState.stats || {}),
-                    source_count: nextSources.length,
+                    source_count: nextSources.filter(source => isResourceSourceSyncEnabled(source)).length,
+                    total_source_count: nextSources.length,
+                    sync_source_count: nextSources.filter(source => isResourceSourceSyncEnabled(source)).length,
+                    search_source_count: nextSources.filter(source => isResourceSourceSearchEnabled(source)).length,
+                    disabled_source_count: nextSources.filter(source => !isResourceSourceSearchEnabled(source)).length,
                 },
-                channel_sections: syncResourceSectionsWithSources(resourceState.channel_sections || [], nextSources),
-                search_sections: syncResourceSectionsWithSources(resourceState.search_sections || [], nextSources),
+                channel_sections: syncResourceSectionsWithSources(resourceState.channel_sections || [], nextSources, { usageMode: 'sync' }),
+                search_sections: syncResourceSectionsWithSources(resourceState.search_sections || [], nextSources, { usageMode: 'search' }),
             };
 
             normalizeResourceSourceBulkSelections();
             syncResourceChannelPagingState();
-            const sourceCountEl = document.getElementById('resource-source-count');
-            if (sourceCountEl) sourceCountEl.innerText = String(nextSources.length);
+            renderResourceSourceStats();
             syncResourceSourceSelect();
             renderResourceOnboardingCard();
             renderResourceSources();
@@ -2351,14 +2435,16 @@
             const nextChannelSections = applyResourceJobStatusesToSections(
                 syncResourceSectionsWithSources(
                     hydrateResourceSections(Array.isArray(data.channel_sections) ? data.channel_sections : (resourceState.channel_sections || [])),
-                    nextSources
+                    nextSources,
+                    { usageMode: 'sync' }
                 ),
                 nextJobStatusByResourceId
             );
             const nextSearchSections = applyResourceJobStatusesToSections(
                 syncResourceSectionsWithSources(
                     hydrateResourceSections(Array.isArray(data.search_sections) ? data.search_sections : (resourceState.search_sections || [])),
-                    nextSources
+                    nextSources,
+                    { usageMode: 'search' }
                 ),
                 nextJobStatusByResourceId
             );
@@ -2372,10 +2458,16 @@
             const nextProviderFilter = normalizeResourceProviderFilter(resourceProviderFilter || resourceState.provider_filter || data.provider_filter || 'all');
             const currentStats = resourceState.stats && typeof resourceState.stats === 'object' ? resourceState.stats : {};
             const incomingStats = data.stats && typeof data.stats === 'object' ? data.stats : {};
+            const fallbackSyncSourceCount = nextSources.filter(source => isResourceSourceSyncEnabled(source)).length;
+            const fallbackSearchSourceCount = nextSources.filter(source => isResourceSourceSearchEnabled(source)).length;
             const nextStats = {
                 ...currentStats,
                 ...incomingStats,
-                source_count: Number(incomingStats.source_count ?? currentStats.source_count ?? nextSources.length ?? 0),
+                source_count: Number(incomingStats.source_count ?? currentStats.source_count ?? fallbackSyncSourceCount ?? 0),
+                total_source_count: Number(incomingStats.total_source_count ?? currentStats.total_source_count ?? nextSources.length ?? 0),
+                sync_source_count: Number(incomingStats.sync_source_count ?? currentStats.sync_source_count ?? fallbackSyncSourceCount ?? 0),
+                search_source_count: Number(incomingStats.search_source_count ?? currentStats.search_source_count ?? fallbackSearchSourceCount ?? 0),
+                disabled_source_count: Number(incomingStats.disabled_source_count ?? currentStats.disabled_source_count ?? Math.max(0, nextSources.length - fallbackSearchSourceCount)),
                 item_count: Number(incomingStats.item_count ?? currentStats.item_count ?? 0),
                 filtered_item_count: Number(incomingStats.filtered_item_count ?? currentStats.filtered_item_count ?? nextItems.length ?? 0),
                 total_job_count: Number(incomingStats.total_job_count ?? currentStats.total_job_count ?? 0),
@@ -2451,9 +2543,7 @@
                 }
             }
 
-            const stats = resourceState.stats || {};
-            document.getElementById('resource-source-count').innerText = String(stats.source_count ?? resourceState.sources.length ?? 0);
-            document.getElementById('resource-item-count').innerText = String(stats.item_count ?? 0);
+            renderResourceSourceStats();
             syncResourceJobClearMenuState();
             if (data.cookie_health && typeof data.cookie_health === 'object') {
                 renderResourceCookieHint();

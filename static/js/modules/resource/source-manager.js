@@ -1,8 +1,38 @@
+        const RESOURCE_SOURCE_USAGE_OPTIONS = [
+            { value: 'off', label: '关闭' },
+            { value: 'search_only', label: '仅搜索' },
+            { value: 'sync_search', label: '同步+搜索' },
+        ];
+
+        function normalizeResourceSourceUsageValue(value) {
+            return normalizeResourceSourceUsage({ usage: value });
+        }
+
+        function renderResourceSourceUsageOptions(currentUsage) {
+            const usage = normalizeResourceSourceUsageValue(currentUsage || 'sync_search');
+            return RESOURCE_SOURCE_USAGE_OPTIONS.map(option => `
+                <option value="${escapeHtml(option.value)}" ${usage === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>
+            `).join('');
+        }
+
+        function buildResourceSourceUsagePatch(usageValue) {
+            const usage = normalizeResourceSourceUsageValue(usageValue || 'sync_search');
+            const syncEnabled = usage === 'sync_search';
+            const searchEnabled = usage === 'search_only' || usage === 'sync_search';
+            return {
+                usage,
+                enabled: searchEnabled,
+                sync_enabled: syncEnabled,
+                search_enabled: searchEnabled,
+            };
+        }
+
         function currentResourceSourceFormData() {
+            const usage = normalizeResourceSourceUsageValue(document.getElementById('resource_source_usage')?.value || 'sync_search');
             return {
                 name: document.getElementById('resource_source_name').value.trim(),
                 channel_id: normalizeTelegramChannelIdInput(document.getElementById('resource_source_channel').value.trim()),
-                enabled: document.getElementById('resource_source_enabled').checked
+                ...buildResourceSourceUsagePatch(usage)
             };
         }
 
@@ -316,9 +346,10 @@
         function isResourceSourceVisibleByEnabled(source, enabledFilter = resourceSourceEnabledFilter) {
             const filter = normalizeResourceSourceFilterValue(enabledFilter);
             if (filter === 'all') return true;
-            const enabled = source?.enabled !== false;
-            if (filter === 'enabled') return enabled;
-            if (filter === 'disabled') return !enabled;
+            const usage = normalizeResourceSourceUsage(source);
+            if (filter === 'off') return usage === 'off';
+            if (filter === 'search_only') return usage === 'search_only';
+            if (filter === 'sync_search') return usage === 'sync_search';
             return true;
         }
 
@@ -341,16 +372,16 @@
 
         function buildResourceSourceEnabledFilterOptions(sources) {
             const list = Array.isArray(sources) ? sources : [];
-            let enabledCount = 0;
-            let disabledCount = 0;
+            const counters = { off: 0, search_only: 0, sync_search: 0 };
             list.forEach(source => {
-                if (source?.enabled === false) disabledCount += 1;
-                else enabledCount += 1;
+                const usage = normalizeResourceSourceUsage(source);
+                counters[usage] = Number(counters[usage] || 0) + 1;
             });
             return [
                 { value: 'all', label: '全部', count: list.length },
-                { value: 'enabled', label: '已启用', count: enabledCount },
-                { value: 'disabled', label: '已停用', count: disabledCount },
+                { value: 'off', label: '关闭', count: counters.off },
+                { value: 'search_only', label: '仅搜索', count: counters.search_only },
+                { value: 'sync_search', label: '同步+搜索', count: counters.sync_search },
             ];
         }
 
@@ -780,26 +811,32 @@
             });
         }
 
-        async function bulkEnableResourceSources(enabled) {
+        async function bulkSetResourceSourceUsage(usageValue) {
             const selectedIds = getSelectedResourceSourceIdsInFiltered();
             if (!selectedIds.length) {
                 showToast('请先在当前筛选结果中勾选要操作的频道', { tone: 'warn', duration: 2600, placement: 'top-center' });
                 return;
             }
             const selectedSet = new Set(selectedIds);
+            const usagePatch = buildResourceSourceUsagePatch(usageValue);
+            const usageLabel = getResourceSourceUsageLabel(usagePatch.usage);
             const nextSources = (resourceState.sources || []).map(source => {
                 const channelId = getResourceSourceChannelId(source);
                 if (!selectedSet.has(channelId)) return source;
-                return { ...source, enabled: !!enabled };
+                return { ...source, ...usagePatch };
             });
             try {
                 const saveTask = persistResourceSources(nextSources);
                 renderResourceSourceManagerModal();
-                showToast(`已${enabled ? '启用' : '停用'} ${selectedIds.length} 个频道`, { tone: 'success', duration: 2400, placement: 'top-center' });
-                reportResourceSourcePersistFailure(saveTask, enabled ? '启用' : '停用');
+                showToast(`已将 ${selectedIds.length} 个频道设为${usageLabel}`, { tone: 'success', duration: 2400, placement: 'top-center' });
+                reportResourceSourcePersistFailure(saveTask, `设为${usageLabel}`);
             } catch (e) {
                 showToast(`操作失败：${e.message}`, { tone: 'error', duration: 3200, placement: 'top-center' });
             }
+        }
+
+        async function bulkEnableResourceSources(enabled) {
+            await bulkSetResourceSourceUsage(enabled ? 'sync_search' : 'off');
         }
 
         async function bulkDeleteResourceSources() {
@@ -1000,7 +1037,8 @@
                     return;
                 }
                 listEl.innerHTML = draftViews.map((view, position) => {
-                    const enabled = view.source.enabled !== false;
+                    const usageLabel = getResourceSourceUsageLabel(view.source);
+                    const usageBadgeClass = getResourceSourceUsageBadgeClass(view.source);
                     const latestAge = view.latestPublishedMs ? formatResourceAgeText(view.latestPublishedMs) : '待同步';
                     const typeText = (Array.isArray(view.sourceTypes) ? view.sourceTypes : [])
                         .slice(0, 3)
@@ -1026,7 +1064,7 @@
                                     <span>${escapeHtml(view.source.name || view.channelId || '未命名频道')}</span>
                                     <span class="resource-source-manager-channel-link">@${escapeHtml(view.channelId || '--')}</span>
                                     ${typeBadges}
-                                    <span class="text-[10px] px-2 py-0.5 rounded-full ${enabled ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-slate-700 text-slate-300 border border-slate-600'}">${enabled ? '已启用' : '已停用'}</span>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full ${usageBadgeClass}">${escapeHtml(usageLabel)}</span>
                                 </div>
                                 <div class="resource-source-manager-row-meta">类型：${escapeHtml(typeText || getResourceLinkTypeLabel(view.primaryType || 'unknown'))} · 最近：${escapeHtml(latestAge)}</div>
                             </div>
@@ -1041,13 +1079,15 @@
             }
 
             if (!filtered.length) {
-                listEl.innerHTML = '<div class="resource-source-empty"><div class="resource-source-empty-title">当前筛选无结果</div><div class="resource-source-empty-copy">可以切换资源类型、启用状态或活跃时间范围。</div></div>';
+                listEl.innerHTML = '<div class="resource-source-empty"><div class="resource-source-empty-title">当前筛选无结果</div><div class="resource-source-empty-copy">可以切换资源类型、频道用途或活跃时间范围。</div></div>';
                 return;
             }
 
             listEl.innerHTML = filtered.map(view => {
                 const checked = !!resourceSourceBulkSelected[view.channelId];
-                const enabled = view.source.enabled !== false;
+                const usage = normalizeResourceSourceUsage(view.source);
+                const usageLabel = getResourceSourceUsageLabel(usage);
+                const usageBadgeClass = getResourceSourceUsageBadgeClass(usage);
                 const latest = String(view.latestPublishedAt || '').trim();
                 const latestAge = view.latestPublishedMs ? formatResourceAgeText(view.latestPublishedMs) : '待同步';
                 const typeText = (Array.isArray(view.sourceTypes) ? view.sourceTypes : [])
@@ -1075,12 +1115,14 @@
                                 <span>${escapeHtml(view.source.name || view.channelId || '未命名频道')}</span>
                                 ${channelLink ? `<a href="${escapeHtml(channelLink)}" target="_blank" rel="noopener noreferrer" class="resource-source-manager-channel-link">@${escapeHtml(view.channelId || '--')}</a>` : `<span class="resource-source-manager-channel-link">@${escapeHtml(view.channelId || '--')}</span>`}
                                 ${typeBadges}
-                                <span class="text-[10px] px-2 py-0.5 rounded-full ${enabled ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-slate-700 text-slate-300 border border-slate-600'}">${enabled ? '已启用' : '已停用'}</span>
+                                <span class="text-[10px] px-2 py-0.5 rounded-full ${usageBadgeClass}">${escapeHtml(usageLabel)}</span>
                             </div>
                             <div class="resource-source-manager-row-meta">类型：${escapeHtml(typeText || getResourceLinkTypeLabel(view.primaryType || 'unknown'))} · 活跃度：${escapeHtml(getResourceSourceActivityBucketLabel(view.activityBucket))} · 最近：${escapeHtml(latestAge)}${latest ? `（${escapeHtml(formatTimeText(latest))}）` : ''} · ${escapeHtml(supportText)}</div>
                         </div>
                         <div class="resource-source-manager-row-actions">
-                            <button type="button" data-resource-source-manager-action="toggle" data-source-index="${view.index}" data-enabled="${enabled ? '1' : '0'}" class="resource-source-compact-btn">${enabled ? '停用' : '启用'}</button>
+                            <select data-resource-source-usage-select="1" data-source-index="${view.index}" class="resource-source-usage-select" aria-label="设置 ${escapeHtml(view.source.name || view.channelId || '频道')} 的用途">
+                                ${renderResourceSourceUsageOptions(usage)}
+                            </select>
                             <button type="button" data-resource-source-manager-action="edit" data-source-index="${view.index}" class="resource-source-compact-btn">编辑</button>
                             <button type="button" data-resource-source-manager-action="delete" data-source-index="${view.index}" class="resource-source-compact-btn resource-source-compact-btn-danger">删除</button>
                         </div>
@@ -1179,18 +1221,21 @@
 
         function syncResourceSourceSummary() {
             const sources = Array.isArray(resourceState.sources) ? resourceState.sources : [];
-            const enabledCount = sources.filter(source => source.enabled !== false).length;
-            const disabledCount = Math.max(0, sources.length - enabledCount);
+            const syncCount = sources.filter(source => isResourceSourceSyncEnabled(source)).length;
+            const searchCount = sources.filter(source => isResourceSourceSearchEnabled(source)).length;
+            const disabledCount = Math.max(0, sources.length - searchCount);
             const sectionIndex = getResourceSourceSectionIndex();
             const outputCount = getResourceSourceViewList(sources, sectionIndex)
                 .filter(view => getResourceSourceOutputCount(view) > 0)
                 .length;
             const totalEl = document.getElementById('resource-source-total-count');
             const enabledEl = document.getElementById('resource-source-enabled-count');
+            const searchEl = document.getElementById('resource-source-search-count');
             const disabledEl = document.getElementById('resource-source-disabled-count');
             const outputEl = document.getElementById('resource-source-output-count');
             if (totalEl) totalEl.innerText = String(sources.length);
-            if (enabledEl) enabledEl.innerText = String(enabledCount);
+            if (enabledEl) enabledEl.innerText = String(syncCount);
+            if (searchEl) searchEl.innerText = String(searchCount);
             if (disabledEl) disabledEl.innerText = String(disabledCount);
             if (outputEl) outputEl.innerText = String(outputCount);
         }
@@ -1203,8 +1248,8 @@
             if (titleEl) titleEl.innerText = editing ? '编辑频道订阅' : '新增频道订阅';
             if (subtitleEl) {
                 subtitleEl.innerText = editing
-                    ? '修改名称、频道 ID 或启用状态后会立即保存，并同步更新资源中心里的订阅展示。'
-                    : '只需要填写公开频道 ID，保存后会立刻出现在资源中心的订阅列表里。';
+                    ? '修改名称、频道 ID 或频道用途后会立即保存。仅搜索频道不会进入同步展示，但仍参与频道搜索。'
+                    : '只需要填写公开频道 ID；默认同步+搜索，也可以改为仅搜索或关闭。';
             }
             if (saveBtn) saveBtn.innerText = editing ? '保存修改' : '保存频道订阅';
         }
@@ -1213,7 +1258,8 @@
             editingResourceSourceIndex = null;
             document.getElementById('resource_source_name').value = '';
             document.getElementById('resource_source_channel').value = '';
-            document.getElementById('resource_source_enabled').checked = true;
+            const usageEl = document.getElementById('resource_source_usage');
+            if (usageEl) usageEl.value = 'sync_search';
             syncResourceSourceModalState();
         }
 
@@ -1225,7 +1271,8 @@
                 editingResourceSourceIndex = index;
                 document.getElementById('resource_source_name').value = source.name || '';
                 document.getElementById('resource_source_channel').value = getResourceSourceChannelId(source);
-                document.getElementById('resource_source_enabled').checked = source.enabled !== false;
+                const usageEl = document.getElementById('resource_source_usage');
+                if (usageEl) usageEl.value = normalizeResourceSourceUsage(source);
             } else {
                 resetResourceSourceForm();
             }
@@ -1252,7 +1299,7 @@
             const titleEl = document.getElementById('resource-channel-manage-title');
             const orderEl = document.getElementById('resource-channel-manage-order');
             const pinBtn = document.getElementById('resource-channel-manage-pin-btn');
-            const enabledEl = document.getElementById('resource-channel-manage-enabled');
+            const usageEl = document.getElementById('resource-channel-manage-usage');
             const nameEl = document.getElementById('resource-channel-manage-name');
             const sources = Array.isArray(resourceState.sources) ? resourceState.sources : [];
             const index = resourceChannelManageSourceIndex;
@@ -1265,7 +1312,7 @@
                     pinBtn.classList.add('btn-disabled');
                     pinBtn.innerText = '置顶（排序挪到1号）';
                 }
-                if (enabledEl) enabledEl.checked = false;
+                if (usageEl) usageEl.value = 'off';
                 if (nameEl) nameEl.value = '';
                 return;
             }
@@ -1279,7 +1326,7 @@
                 pinBtn.classList.toggle('btn-disabled', alreadyTop);
                 pinBtn.innerText = alreadyTop ? '已在1号位' : '置顶（排序挪到1号）';
             }
-            if (enabledEl && !keepLocalForm) enabledEl.checked = source?.enabled !== false;
+            if (usageEl && !keepLocalForm) usageEl.value = normalizeResourceSourceUsage(source);
             if (nameEl && (!keepLocalForm || !nameEl.value.trim())) {
                 nameEl.value = displayName;
             }
@@ -1290,9 +1337,9 @@
             resourceChannelManageChannelId = '';
             resourceChannelManageDirty = false;
             const nameEl = document.getElementById('resource-channel-manage-name');
-            const enabledEl = document.getElementById('resource-channel-manage-enabled');
+            const usageEl = document.getElementById('resource-channel-manage-usage');
             if (nameEl) nameEl.value = '';
-            if (enabledEl) enabledEl.checked = true;
+            if (usageEl) usageEl.value = 'sync_search';
             syncResourceChannelManageModalState();
         }
 
@@ -1308,9 +1355,9 @@
             resourceChannelManageChannelId = normalized;
             resourceChannelManageDirty = false;
             const nameEl = document.getElementById('resource-channel-manage-name');
-            const enabledEl = document.getElementById('resource-channel-manage-enabled');
+            const usageEl = document.getElementById('resource-channel-manage-usage');
             if (nameEl) nameEl.value = String(source?.name || normalized).trim() || normalized;
-            if (enabledEl) enabledEl.checked = source?.enabled !== false;
+            if (usageEl) usageEl.value = normalizeResourceSourceUsage(source);
             syncResourceChannelManageModalState();
             resourceChannelManageModalOpen = true;
             showLockedModal('resource-channel-manage-modal');
@@ -1337,12 +1384,13 @@
                 return;
             }
             const nameEl = document.getElementById('resource-channel-manage-name');
-            const enabledEl = document.getElementById('resource-channel-manage-enabled');
+            const usageEl = document.getElementById('resource-channel-manage-usage');
             const nextName = String(nameEl?.value || '').trim() || channelId;
+            const usagePatch = buildResourceSourceUsagePatch(usageEl?.value || 'sync_search');
             sources[index] = {
                 ...sources[index],
                 name: nextName,
-                enabled: !!enabledEl?.checked,
+                ...usagePatch,
             };
             try {
                 const saveTask = persistResourceSources(sources);
@@ -1407,6 +1455,7 @@
                     return {
                         name: String(source?.name || channelId || fallbackName).trim() || fallbackName,
                         id: channelId,
+                        usage: normalizeResourceSourceUsage(source),
                     };
                 })
                 .filter(Boolean);
@@ -1415,7 +1464,7 @@
         function buildResourceSourceExportText(sources = []) {
             const items = buildResourceSourceExportItems(sources);
             return {
-                label: 'CloudSaver JSON',
+                label: 'MediaHub JSON',
                 count: items.length,
                 text: JSON.stringify(items, null, 2),
             };
@@ -1458,7 +1507,7 @@
                 return;
             }
             const subtitle = document.getElementById('resource-source-export-subtitle');
-            if (subtitle) subtitle.innerText = `当前将导出 ${exportData.count} 个频道，格式为 CloudSaver JSON。需要文件时请点击“下载 JSON”。`;
+            if (subtitle) subtitle.innerText = `当前将导出 ${exportData.count} 个频道，格式为 MediaHub JSON，并保留频道用途。需要文件时请点击“下载 JSON”。`;
             const input = document.getElementById('resource_source_export_json');
             if (input) input.value = exportData.text;
             showLockedModal('resource-source-export-modal');
@@ -1543,7 +1592,7 @@
                     source: {
                         name: channelId,
                         channel_id: channelId,
-                        enabled: true,
+                        ...buildResourceSourceUsagePatch('sync_search'),
                     },
                     reason: '',
                 };
@@ -1560,7 +1609,13 @@
             const normalized = {
                 name: String(raw.name || raw.title || channelId).trim() || channelId,
                 channel_id: channelId,
-                enabled: typeof raw.enabled === 'boolean' ? raw.enabled : true,
+                ...buildResourceSourceUsagePatch(
+                    raw.usage || (
+                        typeof raw.enabled === 'boolean'
+                            ? (raw.enabled ? 'sync_search' : 'off')
+                            : 'sync_search'
+                    )
+                ),
             };
             return { source: normalized, reason: '' };
         }
@@ -1662,7 +1717,7 @@
             let jsonError = null;
             try {
                 payload = parseCloudSaverResourceSourceImportText(text);
-                detectedFormat = 'CloudSaver JSON';
+                detectedFormat = 'MediaHub / CloudSaver JSON';
             } catch (e) {
                 jsonError = e;
             }
@@ -1908,21 +1963,26 @@
             }
         }
 
-        async function toggleResourceSourceEnabled(index, enabled) {
+        async function setResourceSourceUsage(index, usageValue) {
             const sources = [...(resourceState.sources || [])];
             if (index < 0 || index >= sources.length) return false;
+            const usagePatch = buildResourceSourceUsagePatch(usageValue);
             sources[index] = {
                 ...sources[index],
-                enabled: !!enabled
+                ...usagePatch
             };
             try {
                 const saveTask = persistResourceSources(sources);
-                reportResourceSourcePersistFailure(saveTask, enabled ? '启用' : '停用');
+                reportResourceSourcePersistFailure(saveTask, `设为${getResourceSourceUsageLabel(usagePatch.usage)}`);
                 return true;
             } catch (e) {
                 showToast(`操作失败：${e.message}`, { tone: 'error', duration: 3200, placement: 'top-center' });
                 return false;
             }
+        }
+
+        async function toggleResourceSourceEnabled(index, enabled) {
+            return setResourceSourceUsage(index, enabled ? 'sync_search' : 'off');
         }
 
         async function saveResourceSource() {

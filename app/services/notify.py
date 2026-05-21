@@ -58,6 +58,18 @@ _wecom_app_token_cache: Dict[str, Dict[str, Any]] = {}
 _wecom_app_token_lock = threading.Lock()
 
 
+def prune_notify_runtime_caches() -> Dict[str, int]:
+    now_ts = time.time()
+    removed = 0
+    with _wecom_app_token_lock:
+        for cache_key, entry in list(_wecom_app_token_cache.items()):
+            if float((entry or {}).get("expires_at", 0.0) or 0.0) > now_ts:
+                continue
+            _wecom_app_token_cache.pop(cache_key, None)
+            removed += 1
+    return {"wecom_app_token": removed}
+
+
 def _normalize_notify_channel(value: Any) -> str:
     key = str(value or "").strip().lower()
     if key in ("wecom_app", "app", "application", "wecom-api", "wecom_api", "api"):

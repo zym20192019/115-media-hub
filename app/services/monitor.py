@@ -407,7 +407,7 @@ async def run_monitor_task(
         monitor_status["current_task"] = ""
         monitor_control["cancel"] = False
         schedule_ui_state_push(0)
-        release_process_memory(f"monitor:{task_name}")
+        release_process_memory(f"monitor:{task_name}", force=True)
         await start_next_monitor_job()
 
 

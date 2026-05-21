@@ -5068,4 +5068,4 @@ async def run_subscription_task(
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error("启动下一个订阅任务失败: %s", exc, exc_info=True)
-        release_process_memory(f"subscription:{task_name}")
+        release_process_memory(f"subscription:{task_name}", force=True)

@@ -20,13 +20,13 @@ MEMORY_TRIM_ENABLED = str(os.environ.get("MEMORY_TRIM_ENABLED", "1") or "1").str
 _memory_trim_runtime: Dict[str, float] = {"last_trim_ts": 0.0}
 
 
-def release_process_memory(reason: str = "") -> bool:
+def release_process_memory(reason: str = "", force: bool = False) -> bool:
     """Return free Python arenas to libc on Linux after large transient jobs."""
     if not MEMORY_TRIM_ENABLED:
         return False
     now_ts = time.monotonic()
     last_trim_ts = float(_memory_trim_runtime.get("last_trim_ts", 0.0) or 0.0)
-    if MEMORY_TRIM_MIN_INTERVAL_SECONDS > 0 and now_ts - last_trim_ts < MEMORY_TRIM_MIN_INTERVAL_SECONDS:
+    if (not force) and MEMORY_TRIM_MIN_INTERVAL_SECONDS > 0 and now_ts - last_trim_ts < MEMORY_TRIM_MIN_INTERVAL_SECONDS:
         return False
     _memory_trim_runtime["last_trim_ts"] = now_ts
     gc.collect()

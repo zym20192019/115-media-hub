@@ -76,7 +76,13 @@ def ensure_db() -> None:
             _configure_connection(conn, enable_wal=True)
             cursor = conn.cursor()
             cursor.execute(
-                "CREATE TABLE IF NOT EXISTS local_files (path_hash TEXT PRIMARY KEY, relative_path TEXT)"
+                """
+                CREATE TABLE IF NOT EXISTS local_files (
+                    path_hash TEXT PRIMARY KEY,
+                    relative_path TEXT,
+                    scan_token TEXT NOT NULL DEFAULT ''
+                )
+                """
             )
             cursor.execute(
                 """
@@ -338,10 +344,15 @@ def ensure_db() -> None:
                 )
                 """
             )
+            cursor.execute("PRAGMA table_info(local_files)")
+            local_file_columns = {str(row[1]) for row in cursor.fetchall()}
+            if "scan_token" not in local_file_columns:
+                cursor.execute("ALTER TABLE local_files ADD COLUMN scan_token TEXT NOT NULL DEFAULT ''")
             cursor.execute("PRAGMA table_info(resource_jobs)")
             job_columns = {str(row[1]) for row in cursor.fetchall()}
             if "extra_json" not in job_columns:
                 cursor.execute("ALTER TABLE resource_jobs ADD COLUMN extra_json TEXT NOT NULL DEFAULT '{}'")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_local_files_scan_token ON local_files(scan_token)")
             cursor.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_items_link ON resource_items(link_url) WHERE link_url <> ''"
             )

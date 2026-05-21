@@ -24,6 +24,32 @@ _ASSET_VERSION_CACHE: Tuple[float, str] = (0.0, "")
 _TEMPLATE_CACHE: Dict[str, Tuple[float, str]] = {}
 
 
+def prune_page_runtime_caches() -> Dict[str, int]:
+    now = time.time()
+    removed_login_attempts = 0
+    with _login_attempts_lock:
+        for client_ip, attempts in list(_login_attempts.items()):
+            fresh_attempts = [ts for ts in attempts if now - float(ts or 0.0) < _LOGIN_LOCKOUT_SECONDS]
+            if fresh_attempts:
+                if len(fresh_attempts) != len(attempts):
+                    _login_attempts[client_ip] = fresh_attempts
+                    removed_login_attempts += len(attempts) - len(fresh_attempts)
+                continue
+            _login_attempts.pop(client_ip, None)
+            removed_login_attempts += len(attempts)
+
+    removed_templates = 0
+    if _TEMPLATE_CACHE_SECONDS > 0:
+        now_mono = time.monotonic()
+        with _CACHE_LOCK:
+            for name, (cached_at, _content) in list(_TEMPLATE_CACHE.items()):
+                if now_mono - float(cached_at or 0.0) < _TEMPLATE_CACHE_SECONDS:
+                    continue
+                _TEMPLATE_CACHE.pop(name, None)
+                removed_templates += 1
+    return {"login_attempts": removed_login_attempts, "templates": removed_templates}
+
+
 def _get_asset_version() -> str:
     global _ASSET_VERSION_CACHE
     now = time.monotonic()

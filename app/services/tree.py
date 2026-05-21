@@ -1,7 +1,16 @@
+import io
 from http.cookies import SimpleCookie
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from ..core import *  # noqa: F401,F403
+from ..memory import release_process_memory
 from .strm_files import delete_managed_strm_file, managed_strm_file_path
+
+TREE_SYNC_PATH_BATCH_SIZE = max(
+    100,
+    min(5000, int(os.environ.get("TREE_SYNC_PATH_BATCH_SIZE", 1000) or 1000)),
+)
+TREE_SYNC_SQLITE_SELECT_CHUNK_SIZE = 800
 
 
 def _format_tree_elapsed_seconds(seconds: float) -> str:
@@ -251,17 +260,18 @@ def _decode_tree_file_text(raw_bytes: bytes) -> str:
     return payload.decode("utf-8", errors="ignore")
 
 
-def _parse_tree_text_to_rel_paths(
+def _scan_tree_text(
     content: str,
     user_exts: Set[str],
     prefix: str,
     exclude: int,
-) -> Tuple[List[str], int, int]:
+    on_match: Optional[Callable[[str], None]] = None,
+) -> Tuple[int, int, int]:
     path_stack: Dict[int, str] = {}
     lines_total = 0
     nodes_total = 0
-    tree_scan_results: List[str] = []
-    for raw_line in str(content or "").splitlines():
+    matched_total = 0
+    for raw_line in io.StringIO(str(content or "")):
         line = str(raw_line or "").replace("\ufeff", "")
         if not line.strip():
             continue
@@ -283,25 +293,152 @@ def _parse_tree_text_to_rel_paths(
         rel_parts = full_parts[max(0, int(exclude or 0)) :]
         final_rel_path = join_relative_path(prefix, "/".join(rel_parts))
         if final_rel_path:
-            tree_scan_results.append(final_rel_path)
-    return tree_scan_results, lines_total, nodes_total
+            matched_total += 1
+            if on_match is not None:
+                on_match(final_rel_path)
+    return matched_total, lines_total, nodes_total
 
 
-async def _scan_115_tree_file_source(
-    cfg: Dict[str, Any],
-    source_rel: str,
+def _stream_tree_file_matches(
+    raw_bytes: bytes,
     user_exts: Set[str],
     prefix: str,
     exclude: int,
-) -> Tuple[List[str], int, int]:
-    cookie = str(cfg.get("cookie_115", "")).strip()
-    if not cookie:
-        raise RuntimeError("请先在参数配置中填写 115 Cookie")
-    raw_bytes = await asyncio.to_thread(_fetch_115_tree_file_bytes, cookie, source_rel)
-    content = await asyncio.to_thread(_decode_tree_file_text, raw_bytes)
+    on_match: Callable[[str], None],
+) -> Tuple[int, int, int]:
+    content = _decode_tree_file_text(raw_bytes)
     if not str(content or "").strip():
-        raise RuntimeError(f"目录树文件为空：{source_rel}")
-    return await asyncio.to_thread(_parse_tree_text_to_rel_paths, content, user_exts, prefix, exclude)
+        raise RuntimeError("目录树文件为空")
+    matched_total, lines_total, nodes_total = _scan_tree_text(content, user_exts, prefix, exclude, on_match=on_match)
+    return matched_total, lines_total, nodes_total
+
+
+def _replay_tree_cache(cache_path: str, on_match: Callable[[str], None]) -> int:
+    matched_total = 0
+    if not os.path.exists(cache_path):
+        return matched_total
+    with open(cache_path, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            rel_path = normalize_relative_path(str(raw_line or "").strip())
+            if not rel_path:
+                continue
+            on_match(rel_path)
+            matched_total += 1
+    return matched_total
+
+
+def _stream_tree_matches_to_cache(
+    cache_path: str,
+    raw_bytes: bytes,
+    user_exts: Set[str],
+    prefix: str,
+    exclude: int,
+    on_match: Callable[[str], None],
+) -> Tuple[int, int, int]:
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    tmp_path = cache_path + ".tmp"
+    matched_total = 0
+    lines_total = 0
+    nodes_total = 0
+    with open(tmp_path, "w", encoding="utf-8") as cache_file:
+        def handle_match(rel_path: str) -> None:
+            nonlocal matched_total
+            normalized = normalize_relative_path(rel_path)
+            if not normalized:
+                return
+            cache_file.write(normalized)
+            cache_file.write("\n")
+            on_match(normalized)
+            matched_total += 1
+
+        try:
+            _matched_total, lines_total, nodes_total = _stream_tree_file_matches(
+                raw_bytes,
+                user_exts,
+                prefix,
+                exclude,
+                handle_match,
+            )
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
+    os.replace(tmp_path, cache_path)
+    return matched_total, lines_total, nodes_total
+
+
+def _iter_chunks(values: List[Any], chunk_size: int) -> List[List[Any]]:
+    size = max(1, int(chunk_size or 1))
+    return [values[idx : idx + size] for idx in range(0, len(values), size)]
+
+
+def _build_local_file_path_hash(rel_path: str) -> str:
+    return hashlib.md5(rel_path.encode("utf-8")).hexdigest()
+
+
+def _mark_local_files_seen_batch(
+    cursor: sqlite3.Cursor,
+    rel_paths: List[str],
+    scan_token: str,
+) -> Tuple[List[str], int]:
+    ordered_rows: List[Tuple[str, str]] = []
+    batch_seen_hashes: Set[str] = set()
+    duplicate_count = 0
+
+    for raw_path in rel_paths:
+        rel_path = normalize_relative_path(raw_path)
+        if not rel_path:
+            continue
+        path_hash = _build_local_file_path_hash(rel_path)
+        if path_hash in batch_seen_hashes:
+            duplicate_count += 1
+            continue
+        batch_seen_hashes.add(path_hash)
+        ordered_rows.append((path_hash, rel_path))
+
+    if not ordered_rows:
+        return [], duplicate_count
+
+    existing_rows: Dict[str, Tuple[str, str]] = {}
+    path_hashes = [path_hash for path_hash, _rel_path in ordered_rows]
+    for chunk in _iter_chunks(path_hashes, TREE_SYNC_SQLITE_SELECT_CHUNK_SIZE):
+        placeholders = ",".join("?" for _item in chunk)
+        cursor.execute(
+            f"SELECT path_hash, relative_path, scan_token FROM local_files WHERE path_hash IN ({placeholders})",
+            chunk,
+        )
+        for path_hash, existing_rel_path, existing_scan_token in cursor.fetchall():
+            existing_rows[str(path_hash or "")] = (
+                normalize_relative_path(existing_rel_path),
+                str(existing_scan_token or ""),
+            )
+
+    upsert_rows: List[Tuple[str, str, str]] = []
+    fresh_paths: List[str] = []
+    for path_hash, rel_path in ordered_rows:
+        existing_rel_path, existing_scan_token = existing_rows.get(path_hash, ("", ""))
+        if existing_rel_path == rel_path and existing_scan_token == scan_token:
+            duplicate_count += 1
+            continue
+        upsert_rows.append((path_hash, rel_path, scan_token))
+        fresh_paths.append(rel_path)
+
+    if upsert_rows:
+        cursor.executemany(
+            """
+            INSERT INTO local_files (path_hash, relative_path, scan_token)
+            VALUES (?, ?, ?)
+            ON CONFLICT(path_hash) DO UPDATE SET
+                relative_path = excluded.relative_path,
+                scan_token = excluded.scan_token
+            WHERE local_files.relative_path <> excluded.relative_path
+               OR local_files.scan_token <> excluded.scan_token
+            """,
+            upsert_rows,
+        )
+    return fresh_paths, duplicate_count
 
 
 async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
@@ -318,10 +455,13 @@ async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
     cleanup_elapsed_seconds = 0.0
     generated_file_count = 0
     unchanged_file_count = 0
+    duplicate_scan_count = 0
+    total_files = 0
     stale_file_candidates = 0
     deleted_file_count = 0
     delete_failed_file_count = 0
     stale_index_count = 0
+    conn: Optional[sqlite3.Connection] = None
 
     try:
         config_error = validate_tree_runtime_config(cfg, use_local)
@@ -336,7 +476,6 @@ async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
         local_raw_cache_count = 0
         parsed_tree_count = 0
         skipped_tree_count = 0
-        scan_results: List[str] = []
         user_exts = get_user_extensions(cfg)
         check_hash_enabled = bool(cfg.get("check_hash", False))
         can_skip_by_hash = check_hash_enabled and cfg.get("sync_mode") != "full" and not force_full
@@ -358,6 +497,64 @@ async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
             "task-divider",
         )
 
+        mount_prefix_115 = get_mount_prefix(cfg, "115")
+        if not mount_prefix_115:
+            raise RuntimeError("请先在参数配置中填写 115 网盘路径前缀")
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        scan_token = f"tree-{int(time.time())}-{secrets.token_hex(8)}"
+        generate_started_at = time.perf_counter()
+        current_source_state: Dict[str, str] = {"label": ""}
+        pending_rel_paths: List[str] = []
+
+        def generate_strm_for_rel_path(rel_path: str) -> None:
+            nonlocal total_files, duplicate_scan_count, generated_file_count, unchanged_file_count
+            normalized = normalize_relative_path(rel_path)
+            if not normalized:
+                return
+            total_files += 1
+            target = managed_strm_file_path(normalized)
+            needs_regenerate = (not os.path.exists(target)) or cfg["sync_mode"] == "full" or force_full
+            if needs_regenerate:
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                remote_path = build_provider_remote_path(cfg, "115", normalized)
+                strm_url = build_strm_play_url(cfg, remote_path)
+                with open(target, "w", encoding="utf-8") as sf:
+                    sf.write(strm_url)
+                generated_file_count += 1
+            else:
+                unchanged_file_count += 1
+
+            if total_files % 1000 == 0:
+                task_status["progress"].update(
+                    {
+                        "step": "生成STRM",
+                        "percent": 40,
+                        "detail": f"{current_source_state['label']} | 已处理 {total_files} 条",
+                    }
+                )
+                schedule_ui_state_push(0)
+
+        def flush_path_batch() -> None:
+            nonlocal duplicate_scan_count
+            if not pending_rel_paths:
+                return
+            batch_paths = list(pending_rel_paths)
+            pending_rel_paths.clear()
+            fresh_paths, batch_duplicates = _mark_local_files_seen_batch(cursor, batch_paths, scan_token)
+            duplicate_scan_count += batch_duplicates
+            for fresh_path in fresh_paths:
+                generate_strm_for_rel_path(fresh_path)
+
+        def process_rel_path(rel_path: str) -> None:
+            normalized = normalize_relative_path(rel_path)
+            if not normalized:
+                return
+            pending_rel_paths.append(normalized)
+            if len(pending_rel_paths) >= TREE_SYNC_PATH_BATCH_SIZE:
+                flush_path_batch()
+
         scanned_tree_line_total = 0
         scanned_tree_node_total = 0
         for idx, tree in enumerate(trees):
@@ -375,8 +572,9 @@ async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
                 }
             )
             current_tree_keys.append(tree_key)
-            tree_cache_path = os.path.join(TREE_DIR, f"cache_{tree_key}.json")
+            tree_cache_path = os.path.join(TREE_DIR, f"cache_{tree_key}.txt")
             tree_raw_cache_path = os.path.join(TREE_DIR, f"raw_{tree_key}.txt")
+            current_source_state["label"] = f"源 {idx + 1}/{len(trees)}：{source_label}"
 
             await update_progress(
                 "读取目录树文件",
@@ -386,6 +584,7 @@ async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
             await write_log(f"读取目录树文件源: {source_label}")
 
             cookie = str(cfg.get("cookie_115", "")).strip()
+            source_fetch_started_at = time.perf_counter()
             try:
                 raw_bytes = await asyncio.to_thread(_fetch_115_tree_file_bytes, cookie, source_rel)
                 fetched_tree_count += 1
@@ -400,40 +599,46 @@ async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
                     f"⚠ 源 {idx + 1} 联网读取失败，已使用上次成功保存的本地目录树副本：{exc}",
                     "warn",
                 )
+            prefetch_elapsed_seconds += max(0.0, time.perf_counter() - source_fetch_started_at)
             file_hash = hashlib.md5(raw_bytes).hexdigest()
             parse_signature = build_tree_parse_signature(file_hash, user_exts)
 
             if can_skip_by_hash:
                 old_state = last_tree_hashes.get(tree_key, {})
                 old_signature = old_state.get("parse_signature", "") if isinstance(old_state, dict) else ""
-                if old_signature and old_signature == parse_signature:
-                    cached_paths = await asyncio.to_thread(load_tree_cache, tree_cache_path)
-                    if cached_paths is not None:
-                        skipped_tree_count += 1
-                        scan_results.extend(cached_paths)
-                        current_tree_hashes[tree_key] = {"parse_signature": parse_signature}
-                        await write_log(f"源 {idx + 1} MD5 无变化，复用缓存 {len(cached_paths)} 条")
-                        continue
+                if old_signature and old_signature == parse_signature and os.path.exists(tree_cache_path):
+                    reused_count = _replay_tree_cache(tree_cache_path, process_rel_path)
+                    skipped_tree_count += 1
+                    current_tree_hashes[tree_key] = {"parse_signature": parse_signature}
+                    await write_log(f"源 {idx + 1} MD5 无变化，复用缓存 {reused_count} 条")
+                    del raw_bytes
+                    continue
 
-            content = await asyncio.to_thread(_decode_tree_file_text, raw_bytes)
-            if not str(content or "").strip():
-                raise RuntimeError(f"目录树文件为空：{source_rel}")
-            tree_scan_results, scanned_lines, scanned_nodes = await asyncio.to_thread(
-                _parse_tree_text_to_rel_paths,
-                content,
-                user_exts,
-                prefix,
-                exclude,
-            )
+            try:
+                matched_count, scanned_lines, scanned_nodes = _stream_tree_matches_to_cache(
+                    tree_cache_path,
+                    raw_bytes,
+                    user_exts,
+                    prefix,
+                    exclude,
+                    process_rel_path,
+                )
+            except RuntimeError as exc:
+                if str(exc) == "目录树文件为空":
+                    raise RuntimeError(f"目录树文件为空：{source_rel}") from exc
+                raise
+
             parsed_tree_count += 1
             scanned_tree_line_total += scanned_lines
             scanned_tree_node_total += scanned_nodes
-            await write_log(
-                f"源 {idx + 1} 解析完成: 行 {scanned_lines} | 节点 {scanned_nodes} | 命中 {len(tree_scan_results)}"
-            )
-            scan_results.extend(tree_scan_results)
             current_tree_hashes[tree_key] = {"parse_signature": parse_signature}
-            await asyncio.to_thread(save_tree_cache, tree_cache_path, tree_scan_results)
+            await write_log(
+                f"源 {idx + 1} 解析完成: 行 {scanned_lines} | 节点 {scanned_nodes} | 命中 {matched_count}"
+            )
+            del raw_bytes
+            flush_path_batch()
+
+        flush_path_batch()
 
         if check_hash_enabled:
             cfg["last_hash"] = json.dumps(
@@ -459,14 +664,9 @@ async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
             await update_progress("任务完成", 100, "MD5 校验命中：无变动")
             return
 
-        deduped_scan_results = unique_preserve_order(scan_results)
-        duplicate_scan_count = max(0, len(scan_results) - len(deduped_scan_results))
         if duplicate_scan_count > 0:
             await write_log(f"检测到重复路径 {duplicate_scan_count} 条，已去重后继续同步")
-        scan_results = deduped_scan_results
-
-        total_files = len(scan_results)
-        prefetch_elapsed_seconds = max(0.0, time.perf_counter() - run_started_at)
+        generate_elapsed_seconds = max(0.0, time.perf_counter() - generate_started_at)
         await write_log(
             (
                 f"本轮概况：联网读取 {fetched_tree_count} 个 | 本地副本 {local_raw_cache_count} 个 | 缓存复用 {skipped_tree_count} 个 | 解析 {parsed_tree_count} 个 | "
@@ -486,57 +686,28 @@ async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
                 return
             raise RuntimeError("扫描结果为空，且未成功读取目录树文件")
 
-        conn = sqlite3.connect(DB_PATH)
-        try:
-            cursor = conn.cursor()
-            cursor.execute("CREATE TEMP TABLE current_scan (path_hash TEXT PRIMARY KEY, relative_path TEXT)")
+        cleanup_started_at = time.perf_counter()
+        await update_progress("清理过期STRM", 90, f"准备校验 {total_files} 条扫描结果")
 
-            mount_prefix_115 = get_mount_prefix(cfg, "115")
-            if not mount_prefix_115:
-                raise RuntimeError("请先在参数配置中填写 115 网盘路径前缀")
-            generate_started_at = time.perf_counter()
-
-            for i, rel_path in enumerate(scan_results):
-                target = managed_strm_file_path(rel_path)
-                needs_regenerate = (not os.path.exists(target)) or cfg["sync_mode"] == "full" or force_full
-                if needs_regenerate:
-                    os.makedirs(os.path.dirname(target), exist_ok=True)
-                    remote_path = build_provider_remote_path(cfg, "115", rel_path)
-                    strm_url = build_strm_play_url(cfg, remote_path)
-                    with open(target, "w", encoding="utf-8") as sf:
-                        sf.write(strm_url)
-                    generated_file_count += 1
-                else:
-                    unchanged_file_count += 1
-
-                path_hash = hashlib.md5(rel_path.encode("utf-8")).hexdigest()
-                cursor.execute("INSERT OR IGNORE INTO current_scan VALUES (?, ?)", (path_hash, rel_path))
-                if total_files and i % 1000 == 0:
-                    await update_progress("生成STRM", 40 + (i / total_files * 50), f"进度: {i}/{total_files}")
-
-            generate_elapsed_seconds = max(0.0, time.perf_counter() - generate_started_at)
-            cleanup_started_at = time.perf_counter()
-
-            cursor.execute(
-                "SELECT relative_path FROM local_files WHERE path_hash NOT IN (SELECT path_hash FROM current_scan)"
-            )
-            stale_rows = cursor.fetchall()
-            stale_file_candidates = len(stale_rows)
-            if cfg.get("sync_clean", True):
-                for (dead_path,) in stale_rows:
+        cursor.execute("SELECT COUNT(*) FROM local_files WHERE scan_token <> ?", (scan_token,))
+        stale_file_candidates = int((cursor.fetchone() or (0,))[0] or 0)
+        if stale_file_candidates > 0 and cfg.get("sync_clean", True):
+            cursor.execute("SELECT relative_path FROM local_files WHERE scan_token <> ?", (scan_token,))
+            while True:
+                rows = cursor.fetchmany(1000)
+                if not rows:
+                    break
+                for (dead_path,) in rows:
                     try:
-                        if delete_managed_strm_file(dead_path):
+                        if delete_managed_strm_file(str(dead_path or "")):
                             deleted_file_count += 1
                     except Exception:
                         delete_failed_file_count += 1
 
-            stale_index_count = stale_file_candidates
-            cursor.execute("DELETE FROM local_files WHERE path_hash NOT IN (SELECT path_hash FROM current_scan)")
-            cursor.execute("INSERT OR REPLACE INTO local_files SELECT * FROM current_scan")
-            conn.commit()
-            cleanup_elapsed_seconds = max(0.0, time.perf_counter() - cleanup_started_at)
-        finally:
-            conn.close()
+        cursor.execute("DELETE FROM local_files WHERE scan_token <> ?", (scan_token,))
+        stale_index_count = max(0, int(cursor.rowcount or 0))
+        conn.commit()
+        cleanup_elapsed_seconds = max(0.0, time.perf_counter() - cleanup_started_at)
 
         cleanup_mode_label = "开启" if cfg.get("sync_clean", True) else "关闭"
         await update_progress("任务完成", 100, f"同步成功: {total_files} 文件")
@@ -566,5 +737,12 @@ async def run_sync(use_local: bool = False, force_full: bool = False) -> None:
         await write_log("━━━━━━━━━━【任务结束 | 目录树文件 | 执行失败】━━━━━━━━━━", "task-divider")
         await update_progress("任务中止", 0, str(exc))
     finally:
+        try:
+            if conn is not None:
+                conn.close()
+                conn = None
+        except Exception:
+            pass
+        await asyncio.to_thread(release_process_memory, "tree-sync", True)
         task_status["running"] = False
         schedule_ui_state_push(0)

@@ -127,7 +127,7 @@ async def _run_resource_channel_sync(force: bool, limit_per_channel: Optional[in
         with resource_channel_sync_submit_lock:
             resource_channel_sync_submitted = False
         schedule_ui_state_push(0)
-        release_process_memory("resource-channel-sync")
+        release_process_memory("resource-channel-sync", force=True)
 
 
 def submit_resource_channel_sync(force: bool, limit_per_channel: Optional[int] = None) -> bool:

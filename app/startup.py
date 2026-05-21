@@ -36,14 +36,18 @@ def prune_runtime_memory_caches() -> Dict[str, Any]:
     from .providers.pan115 import prune_115_list_cache
     from .providers.quark import prune_quark_share_memory_caches
     from .providers.tmdb import prune_tmdb_runtime_cache
+    from .routes.pages import prune_page_runtime_caches
     from .routes.resource import prune_resource_image_cache
     from .routes.strm import prune_strm_runtime_caches
+    from .services.notify import prune_notify_runtime_caches
 
     detail["pan115"] = _run_prune_step(prune_115_list_cache)
     detail["quark"] = _run_prune_step(prune_quark_share_memory_caches)
     detail["tmdb"] = _run_prune_step(lambda: prune_tmdb_runtime_cache(cfg))
+    detail["pages"] = _run_prune_step(prune_page_runtime_caches)
     detail["resource_image"] = _run_prune_step(prune_resource_image_cache)
     detail["strm"] = _run_prune_step(prune_strm_runtime_caches)
+    detail["notify"] = _run_prune_step(prune_notify_runtime_caches)
     return detail
 
 

@@ -317,7 +317,7 @@ app.add_middleware(
 )
 
 
-cors_allow_origins = _split_env_list(os.environ.get("CORS_ALLOW_ORIGINS", ""))
+cors_allow_origins = _split_env_list(os.environ.get("CORS_ALLOW_ORIGINS", "*"))
 cors_allow_origin_regex = str(os.environ.get("CORS_ALLOW_ORIGIN_REGEX", "") or "").strip() or None
 cors_allow_credentials = _env_flag("CORS_ALLOW_CREDENTIALS", False)
 if cors_allow_credentials and "*" in cors_allow_origins:

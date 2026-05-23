@@ -4,8 +4,9 @@ All notable changes to this project will be documented in this file. The format 
 
 ## [Unreleased]
 
-## [0.4.7] - 2026-05-23
+## [0.4.8] - 2026-05-23
 - 修复 Webhook 端点被全局登录中间件拦截的问题：将 `/webhook/{task_name}` 移至独立路由器，不再要求 session 登录，恢复外部客户端（油猴脚本等）通过 token 或 HMAC 签名认证的能力。
+- 默认允许所有 CORS 来源（`CORS_ALLOW_ORIGINS` 默认值改为 `*`），解决油猴脚本 `GM_xmlhttpRequest` 失效回退 `fetch` 时被浏览器 CORS 策略拦截的问题。
 
 ## [0.4.6] - 2026-05-23
 - 重构文件夹监控“按文件夹修改时间校验”状态流：父目录先低成本读取一次，仅对修改时间变化或上次失败待补扫的子目录继续深扫，减少不必要的网盘访问。

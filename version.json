@@ -1,8 +1,8 @@
 {
-  "version": "0.4.7",
+  "version": "0.4.8",
   "buildDate": "2026-05-23T00:00:00+08:00",
   "notes": [
-    "修复 Webhook 端点被登录中间件拦截导致油猴脚本无法推送磁力链接的问题"
+    "修复 Webhook 端点被登录中间件拦截及 CORS 跨域阻止导致油猴脚本无法推送磁力链接的问题"
   ],
   "changelogUrl": "https://github.com/xianer235/115-media-hub/blob/main/CHANGELOG.md",
   "projectUrl": "https://github.com/xianer235/115-media-hub"

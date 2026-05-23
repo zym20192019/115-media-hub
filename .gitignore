@@ -9,6 +9,7 @@ __pycache__/
 .mypy_cache/
 .venv/
 node_modules/
+.playwright-browsers/
 
 # 忽略数据
 strm/
@@ -30,6 +31,9 @@ preview-runtime/
 
 # local editor settings
 .vscode/
+
+# local tests (not for repo)
+tests/
 
 # local agent config (not for repo)
 AGENTS.md

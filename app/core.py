@@ -6894,7 +6894,8 @@ def parse_int(value: Any, default: int = 0) -> int:
 def build_strm_play_url(cfg: Dict[str, Any], remote_path: str, pick_code: str = "") -> str:
     normalized_remote_path = normalize_remote_path(remote_path)
     query_payload: Dict[str, str] = {"path": normalized_remote_path}
-    query = urllib.parse.urlencode(query_payload)
+    # 使用 quote 而非 urlencode 默认的 quote_plus，避免空格被编码为 + 导致某些客户端解析失败
+    query = urllib.parse.urlencode(query_payload, quote_via=urllib.parse.quote)
     proxy_base_url = str(cfg.get("strm_proxy_base_url", "")).strip().rstrip("/")
     if proxy_base_url:
         return f"{proxy_base_url}/strm/proxy?{query}"

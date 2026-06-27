@@ -17,6 +17,117 @@ def _format_tree_elapsed_seconds(seconds: float) -> str:
     return f"{max(0.0, float(seconds or 0.0)):.2f}秒"
 
 
+def generate_115_tree_txt(
+    cookie: str,
+    folder_path: str,
+    output_path: str,
+    max_depth: int = 25,
+) -> Dict[str, Any]:
+    """
+    Generate a 115 directory tree TXT file by recursively listing directories.
+    
+    Args:
+        cookie: 115 API cookie
+        folder_path: Relative path to the folder in 115 (e.g., "我的影视/电影")
+        output_path: Local path where the tree.txt file will be saved
+        max_depth: Maximum directory depth to traverse (default: 25)
+    
+    Returns:
+        Dict with statistics: total_files, total_folders, total_lines
+    """
+    cookie = str(cookie or "").strip()
+    if not cookie:
+        raise RuntimeError("115 Cookie 未配置")
+    
+    folder_path = str(folder_path or "").strip()
+    output_path = str(output_path or "").strip()
+    if not output_path:
+        raise RuntimeError("输出路径不能为空")
+    
+    max_depth = max(1, min(100, int(max_depth or 25)))
+    
+    # Resolve folder ID from path
+    if folder_path:
+        folder_cid = resolve_115_folder_id_by_path(cookie, folder_path)
+    else:
+        folder_cid = "0"  # Root folder
+    
+    if not folder_cid:
+        raise RuntimeError(f"无法找到文件夹：{folder_path}")
+    
+    # Delete old tree file if exists
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except Exception as exc:
+            raise RuntimeError(f"删除旧目录树文件失败：{exc}")
+    
+    # Ensure output directory exists
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    
+    stats = {"total_files": 0, "total_folders": 0, "total_lines": 0}
+    
+    def write_tree_recursive(cid: str, depth: int, file_handle) -> None:
+        """Recursively write tree structure to file."""
+        if depth > max_depth:
+            return
+        
+        try:
+            entries = list_115_entries(cookie, cid, force_refresh=True)
+        except Exception as exc:
+            # Log error but continue with other folders
+            print(f"[WARN] Failed to list folder {cid} at depth {depth}: {exc}")
+            return
+        
+        # Sort entries: folders first, then files, both alphabetically
+        folders = sorted([e for e in entries if e.get("is_dir")], key=lambda x: str(x.get("name", "")))
+        files = sorted([e for e in entries if not e.get("is_dir")], key=lambda x: str(x.get("name", "")))
+        
+        # Write folders
+        for folder in folders:
+            folder_name = str(folder.get("name", "")).strip()
+            if not folder_name:
+                continue
+            
+            # Write tree line: depth number of "|" followed by name
+            line = "|" * depth + folder_name + "\n"
+            file_handle.write(line)
+            stats["total_folders"] += 1
+            stats["total_lines"] += 1
+            
+            # Recurse into subfolder
+            sub_cid = str(folder.get("cid", "")).strip()
+            if sub_cid:
+                write_tree_recursive(sub_cid, depth + 1, file_handle)
+        
+        # Write files
+        for file_entry in files:
+            file_name = str(file_entry.get("name", "")).strip()
+            if not file_name:
+                continue
+            
+            # Write tree line: depth number of "|" followed by name
+            line = "|" * depth + file_name + "\n"
+            file_handle.write(line)
+            stats["total_files"] += 1
+            stats["total_lines"] += 1
+    
+    # Start recursive tree generation
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            write_tree_recursive(folder_cid, 0, f)
+    except Exception as exc:
+        # Clean up partial file on error
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except Exception:
+                pass
+        raise RuntimeError(f"生成目录树失败：{exc}")
+    
+    return stats
+
+
 def _normalize_tree_source_relative_path(raw_source: Any, cfg: Dict[str, Any]) -> str:
     source = str(raw_source or "").strip()
     if not source:

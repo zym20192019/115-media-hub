@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 
 from ..background import submit_background
 from ..core import *  # noqa: F401,F403
-from ..services.tree import run_sync
+from ..services.tree import run_sync, generate_115_tree_txt
 
 router = APIRouter()
 
@@ -21,6 +21,54 @@ async def start_sync(request: Request) -> Dict[str, str]:
         )
         return {"status": "started"}
     return {"status": "busy"}
+
+
+@router.post("/generate")
+async def generate_tree(request: Request) -> Dict[str, Any]:
+    """
+    Generate a new 115 directory tree TXT file.
+    
+    Request body:
+        folder_path: Relative path in 115 (e.g., "我的影视/电影")
+        output_path: Local path where tree.txt will be saved
+        max_depth: Maximum directory depth (default: 25)
+    
+    Returns:
+        Statistics about the generated tree
+    """
+    try:
+        data = await request.json()
+        folder_path = str(data.get("folder_path", "")).strip()
+        output_path = str(data.get("output_path", "")).strip()
+        max_depth = int(data.get("max_depth", 25))
+        
+        if not output_path:
+            return {"ok": False, "msg": "output_path 不能为空"}
+        
+        # Get cookie from config
+        cfg = get_config()
+        cookie = str(cfg.get("cookie_115", "")).strip()
+        
+        if not cookie:
+            return {"ok": False, "msg": "请先在参数配置中填写 115 Cookie"}
+        
+        # Run tree generation in thread pool
+        stats = await asyncio.to_thread(
+            generate_115_tree_txt,
+            cookie,
+            folder_path,
+            output_path,
+            max_depth,
+        )
+        
+        return {
+            "ok": True,
+            "msg": "目录树生成成功",
+            "output_path": output_path,
+            "stats": stats,
+        }
+    except Exception as exc:
+        return {"ok": False, "msg": str(exc)}
 
 
 @router.get("/logs")

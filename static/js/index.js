@@ -2160,6 +2160,63 @@
             container.appendChild(row);
         }
 
+        async function export115Tree() {
+            const folderPath = document.getElementById('tree-export-folder-path')?.value?.trim() || '';
+            const layerLimit = parseInt(document.getElementById('tree-export-layer-limit')?.value || '25', 10);
+            const btn = document.getElementById('tree-export-btn');
+            const statusEl = document.getElementById('tree-export-status');
+
+            if (!folderPath) {
+                if (statusEl) {
+                    statusEl.className = 'text-xs text-red-400';
+                    statusEl.textContent = '请填写 115 文件夹路径';
+                }
+                return;
+            }
+
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = '提交中...';
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+            if (statusEl) {
+                statusEl.className = 'text-xs text-sky-400';
+                statusEl.textContent = '正在提交导出任务...';
+            }
+
+            try {
+                const resp = await fetch('/tree/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ folder_path: folderPath, layer_limit: layerLimit }),
+                });
+                const result = await resp.json();
+
+                if (result.ok) {
+                    if (statusEl) {
+                        statusEl.className = 'text-xs text-emerald-400';
+                        statusEl.textContent = `导出任务已提交 (export_id: ${result.export_id})，请在 115 网盘中查看生成的目录树文件`;
+                    }
+                } else {
+                    if (statusEl) {
+                        statusEl.className = 'text-xs text-red-400';
+                        statusEl.textContent = `失败: ${result.msg || '未知错误'}`;
+                    }
+                }
+            } catch (err) {
+                if (statusEl) {
+                    statusEl.className = 'text-xs text-red-400';
+                    statusEl.textContent = `请求失败: ${err.message}`;
+                }
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '生成目录树';
+                    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            }
+        }
+
         async function resetExtensions() {
             if (await showAppConfirm("确定要恢复默认扫描后缀名吗？\n(恢复后请手动点击下方的保存全部配置)")) {
                 document.getElementById('extensions').value = DEFAULT_EXTENSIONS;

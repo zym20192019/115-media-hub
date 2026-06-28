@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 
 from ..background import submit_background
 from ..core import *  # noqa: F401,F403
-from ..services.tree import run_sync, generate_115_tree_txt
+from ..services.tree import run_sync, export_115_tree
 
 router = APIRouter()
 
@@ -23,27 +23,22 @@ async def start_sync(request: Request) -> Dict[str, str]:
     return {"status": "busy"}
 
 
-@router.post("/generate")
-async def generate_tree(request: Request) -> Dict[str, Any]:
+@router.post("/export")
+async def export_tree(request: Request) -> Dict[str, Any]:
     """
-    Generate a new 115 directory tree TXT file.
+    调用115官方API异步导出目录树。
     
     Request body:
-        folder_path: Relative path in 115 (e.g., "我的影视/电影")
-        output_path: Local path where tree.txt will be saved
-        max_depth: Maximum directory depth (default: 25)
+        folder_path: 115中的相对路径 (e.g., "我的影视/电影")
+        layer_limit: 目录深度限制 (default: 25)
     
     Returns:
-        Statistics about the generated tree
+        export_id: 导出任务ID，用于后续查询状态
     """
     try:
         data = await request.json()
         folder_path = str(data.get("folder_path", "")).strip()
-        output_path = str(data.get("output_path", "")).strip()
-        max_depth = int(data.get("max_depth", 25))
-        
-        if not output_path:
-            return {"ok": False, "msg": "output_path 不能为空"}
+        layer_limit = int(data.get("layer_limit", 25))
         
         # Get cookie from config
         cfg = get_config()
@@ -52,21 +47,15 @@ async def generate_tree(request: Request) -> Dict[str, Any]:
         if not cookie:
             return {"ok": False, "msg": "请先在参数配置中填写 115 Cookie"}
         
-        # Run tree generation in thread pool
-        stats = await asyncio.to_thread(
-            generate_115_tree_txt,
+        # Call 115 official export API
+        result = await asyncio.to_thread(
+            export_115_tree,
             cookie,
             folder_path,
-            output_path,
-            max_depth,
+            layer_limit,
         )
         
-        return {
-            "ok": True,
-            "msg": "目录树生成成功",
-            "output_path": output_path,
-            "stats": stats,
-        }
+        return result
     except Exception as exc:
         return {"ok": False, "msg": str(exc)}
 

@@ -13,119 +13,149 @@ TREE_SYNC_PATH_BATCH_SIZE = max(
 TREE_SYNC_SQLITE_SELECT_CHUNK_SIZE = 800
 
 
-def _format_tree_elapsed_seconds(seconds: float) -> str:
-    return f"{max(0.0, float(seconds or 0.0)):.2f}秒"
-
-
-def generate_115_tree_txt(
-    cookie: str,
-    folder_path: str,
-    output_path: str,
-    max_depth: int = 25,
-) -> Dict[str, Any]:
+def export_115_tree(cookie: str, folder_path: str, layer_limit: int = 25) -> Dict[str, Any]:
     """
-    Generate a 115 directory tree TXT file by recursively listing directories.
+    调用115官方API导出目录树。
     
     Args:
-        cookie: 115 API cookie
-        folder_path: Relative path to the folder in 115 (e.g., "我的影视/电影")
-        output_path: Local path where the tree.txt file will be saved
-        max_depth: Maximum directory depth to traverse (default: 25)
+        cookie: 115 cookie
+        folder_path: 文件夹相对路径（如 "我的影视/电影"）
+        layer_limit: 目录层级限制（默认25层）
     
     Returns:
-        Dict with statistics: total_files, total_folders, total_lines
+        包含 export_id 的字典，用于后续查询状态
     """
     cookie = str(cookie or "").strip()
     if not cookie:
         raise RuntimeError("115 Cookie 未配置")
     
     folder_path = str(folder_path or "").strip()
-    output_path = str(output_path or "").strip()
-    if not output_path:
-        raise RuntimeError("输出路径不能为空")
+    if not folder_path:
+        raise RuntimeError("文件夹路径不能为空")
     
-    max_depth = max(1, min(100, int(max_depth or 25)))
+    layer_limit = max(1, min(100, int(layer_limit or 25)))
     
-    # Resolve folder ID from path
-    if folder_path:
-        folder_cid = resolve_115_folder_id_by_path(cookie, folder_path)
-    else:
-        folder_cid = "0"  # Root folder
-    
+    # 先将路径转换为文件夹ID (cid)
+    folder_cid = resolve_115_folder_id_by_path(cookie, folder_path)
     if not folder_cid:
         raise RuntimeError(f"无法找到文件夹：{folder_path}")
     
-    # Delete old tree file if exists
-    if os.path.exists(output_path):
-        try:
-            os.remove(output_path)
-        except Exception as exc:
-            raise RuntimeError(f"删除旧目录树文件失败：{exc}")
+    # 调用115官方导出API
+    headers = {
+        "Cookie": cookie,
+        "Accept": "*/*",
+        "Referer": "https://115.com/",
+        "Origin": "https://115.com",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 115Browser/36.0.0",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
     
-    # Ensure output directory exists
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    data = {
+        "file_ids": folder_cid,
+        "target": f"U_1_{folder_cid}",
+        "layer_limit": layer_limit,
+    }
     
-    stats = {"total_files": 0, "total_folders": 0, "total_lines": 0}
-    
-    def write_tree_recursive(cid: str, depth: int, file_handle) -> None:
-        """Recursively write tree structure to file."""
-        if depth > max_depth:
-            return
-        
-        try:
-            entries = list_115_entries(cookie, cid, force_refresh=True)
-        except Exception as exc:
-            # Log error but continue with other folders
-            print(f"[WARN] Failed to list folder {cid} at depth {depth}: {exc}")
-            return
-        
-        # Sort entries: folders first, then files, both alphabetically
-        folders = sorted([e for e in entries if e.get("is_dir")], key=lambda x: str(x.get("name", "")))
-        files = sorted([e for e in entries if not e.get("is_dir")], key=lambda x: str(x.get("name", "")))
-        
-        # Write folders
-        for folder in folders:
-            folder_name = str(folder.get("name", "")).strip()
-            if not folder_name:
-                continue
-            
-            # Write tree line: depth number of "|" followed by name
-            line = "|" * depth + folder_name + "\n"
-            file_handle.write(line)
-            stats["total_folders"] += 1
-            stats["total_lines"] += 1
-            
-            # Recurse into subfolder
-            sub_cid = str(folder.get("cid", "")).strip()
-            if sub_cid:
-                write_tree_recursive(sub_cid, depth + 1, file_handle)
-        
-        # Write files
-        for file_entry in files:
-            file_name = str(file_entry.get("name", "")).strip()
-            if not file_name:
-                continue
-            
-            # Write tree line: depth number of "|" followed by name
-            line = "|" * depth + file_name + "\n"
-            file_handle.write(line)
-            stats["total_files"] += 1
-            stats["total_lines"] += 1
-    
-    # Start recursive tree generation
     try:
-        with open(output_path, "w", encoding="utf-8") as f:
-            write_tree_recursive(folder_cid, 0, f)
+        response = http_request_form_json(
+            "https://webapi.115.com/files/export_dir",
+            data,
+            timeout=45,
+            extra_headers=headers,
+        )
+        
+        if not response.get("state"):
+            error_msg = response.get("error") or response.get("message") or "未知错误"
+            raise RuntimeError(f"115导出目录树失败: {error_msg}")
+        
+        export_id = response.get("data", {}).get("export_id")
+        if not export_id:
+            raise RuntimeError("115导出目录树失败: 未返回export_id")
+        
+        return {
+            "ok": True,
+            "msg": "目录树导出任务已提交",
+            "export_id": export_id,
+            "folder_cid": folder_cid,
+            "folder_path": folder_path,
+        }
     except Exception as exc:
-        # Clean up partial file on error
-        if os.path.exists(output_path):
-            try:
-                os.remove(output_path)
-            except Exception:
-                pass
-        raise RuntimeError(f"生成目录树失败：{exc}")
+        raise RuntimeError(f"调用115导出API失败: {exc}")
+
+
+def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
+    """
+    查询115目录树导出状态。
     
-    return stats
+    Args:
+        cookie: 115 cookie
+        export_id: 导出任务ID
+    
+    Returns:
+        包含导出状态的字典
+    """
+    cookie = str(cookie or "").strip()
+    if not cookie:
+        raise RuntimeError("115 Cookie 未配置")
+    
+    headers = {
+        "Cookie": cookie,
+        "Accept": "*/*",
+        "Referer": "https://115.com/",
+        "Origin": "https://115.com",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 115Browser/36.0.0",
+    }
+    
+    params = {"export_id": export_id}
+    url = f"https://webapi.115.com/files/export_dir?{urllib.parse.urlencode(params)}"
+    
+    try:
+        response = http_request_json(url, timeout=45, headers=headers)
+        
+        if not response.get("state"):
+            error_msg = response.get("error") or response.get("message") or "未知错误"
+            return {
+                "ok": False,
+                "msg": f"查询导出状态失败: {error_msg}",
+                "status": "error",
+            }
+        
+        data = response.get("data", {})
+        status = data.get("status", "")
+        
+        # status: 0=进行中, 1=完成, 2=失败
+        if status == 0:
+            return {
+                "ok": True,
+                "status": "processing",
+                "msg": "导出任务进行中",
+                "progress": data.get("progress", 0),
+            }
+        elif status == 1:
+            return {
+                "ok": True,
+                "status": "completed",
+                "msg": "导出任务已完成",
+                "download_url": data.get("url", ""),
+                "file_size": data.get("file_size", 0),
+                "pick_code": data.get("pick_code", ""),
+            }
+        else:
+            return {
+                "ok": True,
+                "status": "failed",
+                "msg": f"导出任务失败: {data.get('error', '未知错误')}",
+            }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "msg": f"查询导出状态失败: {exc}",
+            "status": "error",
+        }
+
+
+def _format_tree_elapsed_seconds(seconds: float) -> str:
+    return f"{max(0.0, float(seconds or 0.0)):.2f}秒"
 
 
 def _normalize_tree_source_relative_path(raw_source: Any, cfg: Dict[str, Any]) -> str:

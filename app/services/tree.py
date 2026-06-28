@@ -13,6 +13,178 @@ TREE_SYNC_PATH_BATCH_SIZE = max(
 TREE_SYNC_SQLITE_SELECT_CHUNK_SIZE = 800
 
 
+def export_115_tree(cookie: str, folder_path: str, layer_limit: int = 25) -> Dict[str, Any]:
+    """
+    调用115官方API导出目录树。
+    
+    Args:
+        cookie: 115 cookie
+        folder_path: 文件夹相对路径（如 "我的影视/电影"）
+        layer_limit: 目录层级限制（默认25层）
+    
+    Returns:
+        包含 export_id 的字典，用于后续查询状态
+    """
+    cookie = str(cookie or "").strip()
+    if not cookie:
+        raise RuntimeError("115 Cookie 未配置")
+    
+    folder_path = str(folder_path or "").strip()
+    if not folder_path:
+        raise RuntimeError("文件夹路径不能为空")
+    
+    layer_limit = max(1, min(100, int(layer_limit or 25)))
+    
+    # 先将路径转换为文件夹ID (cid)
+    folder_cid = resolve_115_folder_id_by_path(cookie, folder_path)
+    if not folder_cid:
+        raise RuntimeError(f"无法找到文件夹：{folder_path}")
+    
+    # 调用115官方导出API
+    headers = {
+        "Cookie": cookie,
+        "Accept": "*/*",
+        "Referer": "https://115.com/",
+        "Origin": "https://115.com",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 115Browser/36.0.0",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    
+    data = {
+        "file_ids": folder_cid,
+        "target": f"U_1_{folder_cid}",
+        "layer_limit": layer_limit,
+    }
+    
+    try:
+        response = http_request_form_json(
+            "https://webapi.115.com/files/export_dir",
+            data,
+            timeout=45,
+            extra_headers=headers,
+        )
+        
+        if not response.get("state"):
+            error_msg = response.get("error") or response.get("message") or "未知错误"
+            raise RuntimeError(f"115导出目录树失败: {error_msg}")
+        
+        export_id = response.get("data", {}).get("export_id")
+        if not export_id:
+            raise RuntimeError("115导出目录树失败: 未返回export_id")
+        
+        return {
+            "ok": True,
+            "msg": "目录树导出任务已提交",
+            "export_id": export_id,
+            "folder_cid": folder_cid,
+            "folder_path": folder_path,
+        }
+    except Exception as exc:
+        raise RuntimeError(f"调用115导出API失败: {exc}")
+
+
+def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
+    """
+    查询115目录树导出状态。
+    真实 115 API 返回结构：
+      - 处理中：{"state":true, "data":[]}（空数组）
+      - 完成：  {"state":true, "data":{"export_id":"...", "file_id":"...", "file_name":"...", "pick_code":"..."}}
+    
+    Args:
+        cookie: 115 cookie
+        export_id: 导出任务ID
+    
+    Returns:
+        包含导出状态的字典。完成时自动下载 TXT 内容带回。
+    """
+    cookie = str(cookie or "").strip()
+    if not cookie:
+        raise RuntimeError("115 Cookie 未配置")
+    
+    headers = {
+        "Cookie": cookie,
+        "Accept": "*/*",
+        "Referer": "https://115.com/",
+        "Origin": "https://115.com",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 115Browser/36.0.0",
+    }
+    
+    params = {"export_id": export_id}
+    url = f"https://webapi.115.com/files/export_dir?{urllib.parse.urlencode(params)}"
+    
+    try:
+        response = http_request_json(url, timeout=45, extra_headers=headers)
+        
+        if not response.get("state"):
+            error_msg = response.get("error") or response.get("message") or "未知错误"
+            return {
+                "ok": False,
+                "msg": f"查询导出状态失败: {error_msg}",
+                "status": "error",
+            }
+        
+        raw_data = response.get("data")
+        
+        # 实际 API：处理中时 data 是空数组 []
+        if isinstance(raw_data, list):
+            return {
+                "ok": True,
+                "status": "processing",
+                "msg": "导出任务进行中",
+            }
+        
+        # data 是 dict —— 检查是否包含完成信息
+        if isinstance(raw_data, dict) and raw_data.get("pick_code"):
+            pick_code = str(raw_data.get("pick_code", "")).strip()
+            file_name = str(raw_data.get("file_name", "")).strip()
+            file_id = str(raw_data.get("file_id", "")).strip()
+            
+            # 自动下载 TXT 内容
+            try:
+                download_urls, download_cookie = _resolve_115_download_payload(cookie, pick_code)
+                raw_bytes = _download_tree_file_bytes(download_urls, cookie, download_cookie)
+                text_content = raw_bytes.decode("utf-8", errors="replace")
+            except Exception as exc:
+                text_content = None
+                download_err = str(exc)
+            
+            result: Dict[str, Any] = {
+                "ok": True,
+                "status": "completed",
+                "msg": "导出任务已完成",
+                "file_name": file_name,
+                "file_id": file_id,
+                "pick_code": pick_code,
+            }
+            if text_content is not None:
+                result["content"] = text_content
+                result["content_size"] = len(text_content)
+            else:
+                result["download_error"] = download_err
+            return result
+        
+        # data 是 dict 但没有 pick_code，可能出错
+        if isinstance(raw_data, dict):
+            return {
+                "ok": True,
+                "status": "failed",
+                "msg": f"导出任务失败: {raw_data.get('error', '未知错误')}",
+            }
+        
+        # 其他意外情况
+        return {
+            "ok": True,
+            "status": "processing",
+            "msg": "导出任务进行中",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "msg": f"查询导出状态失败: {exc}",
+            "status": "error",
+        }
+
+
 def _format_tree_elapsed_seconds(seconds: float) -> str:
     return f"{max(0.0, float(seconds or 0.0)):.2f}秒"
 

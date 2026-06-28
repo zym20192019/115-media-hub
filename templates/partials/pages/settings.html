@@ -50,6 +50,29 @@
                         <button onclick="addTreeRow()" class="text-xs bg-sky-500/20 text-sky-400 hover:bg-sky-500 hover:text-white px-3 py-1 rounded-lg border border-sky-500/40 transition-all font-bold">+ 添加目录树文件</button>
                     </div>
                     <div id="trees-container" class="space-y-3"></div>
+                    
+                    <!-- 生成目录树功能 -->
+                    <div class="mt-6 pt-4 border-t border-slate-700/50">
+                        <h4 class="text-sm text-slate-300 mb-3">生成 115 目录树</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                            <div class="md:col-span-2">
+                                <label class="block text-xs text-slate-500 mb-1">115 文件夹路径</label>
+                                <input id="tree-export-folder-path" type="text" class="w-full bg-slate-900 border-slate-700 rounded-xl p-2 text-sm outline-none focus:border-sky-500 transition-colors" placeholder="例如：我的影视/电影">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-slate-500 mb-1">目录层级</label>
+                                <input id="tree-export-layer-limit" type="number" value="25" min="1" max="100" class="w-full bg-slate-900 border-slate-700 rounded-xl p-2 text-sm outline-none focus:border-sky-500 transition-colors">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button id="tree-export-btn" onclick="export115Tree()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-colors">
+                                生成目录树
+                            </button>
+                            <div id="tree-export-status" class="text-xs text-slate-400"></div>
+                        </div>
+                        <pre id="tree-export-content" class="hidden mt-3 p-3 bg-slate-900/80 border border-slate-700/50 rounded-xl text-xs text-slate-300 overflow-auto max-h-60 leading-5 whitespace-pre-wrap"></pre>
+                    </div>
+                    
                     <div class="mt-6 pt-4 border-t border-slate-700/50 text-xs text-slate-400 leading-6">
                         这里只支持 115 官方目录树 TXT 文件。<br>
                         根目录文件：路径填 `目录树.txt`。<br>

@@ -142,6 +142,9 @@ function collectSettingsPayload({
         'pansou_channels',
         'pansou_plugins',
         'cron_hour',
+        'tree_export_folder_path',
+        'tree_export_layer_limit',
+        'tree_export_cron_minutes',
         'sync_mode',
         'extensions',
         'username',
@@ -165,6 +168,7 @@ function collectSettingsPayload({
     cfg.notify_monitor_enabled = !!document.getElementById('notify_monitor_enabled')?.checked;
     cfg.tmdb_enabled = !!document.getElementById('tmdb_enabled')?.checked;
     cfg.pansou_enabled = !!document.getElementById('pansou_enabled')?.checked;
+    cfg.tree_export_enabled = !!document.getElementById('tree_export_enabled')?.checked;
     cfg.resource_favorite_dirs = collectResourceFavoriteDirs();
 
     // Dynamically collect provider cookies

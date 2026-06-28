@@ -1020,10 +1020,20 @@ def _prioritize_tv_candidates_by_missing_episodes(
     episode_upper_bound: int = 0,
 ) -> List[Dict[str, Any]]:
     normalized_existing = _clamp_episode_values(existing_episodes, episode_upper_bound=episode_upper_bound)
+    # 固定链接候选（extra.subscription_fixed_link_fallback）保持最前，不受集数排序影响
+    fixed_candidates: List[Dict[str, Any]] = []
+    remaining: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        item = candidate.get("item", {})
+        extra = item.get("extra", {}) if isinstance(item, dict) else {}
+        if isinstance(extra, dict) and extra.get("subscription_fixed_link_fallback"):
+            fixed_candidates.append(candidate)
+        else:
+            remaining.append(candidate)
+
     if not normalized_existing:
         if episode_upper_bound > 0:
-            # 首轮目录为空时，优先尝试“在单季目标集数范围内覆盖更多集数”的候选。
-            prioritized = list(candidates)
+            prioritized = list(remaining)
             prioritized.sort(
                 key=lambda item: (
                     len(_candidate_episode_values(item, episode_upper_bound=episode_upper_bound)),
@@ -1033,14 +1043,14 @@ def _prioritize_tv_candidates_by_missing_episodes(
                 ),
                 reverse=True,
             )
-            return prioritized
-        return list(candidates)
+            return fixed_candidates + prioritized
+        return fixed_candidates + list(remaining)
 
     without_episode: List[Dict[str, Any]] = []
     backfill_candidates: List[Dict[str, Any]] = []
     fresh_candidates: List[Dict[str, Any]] = []
     existing_candidates: List[Dict[str, Any]] = []
-    for candidate in candidates:
+    for candidate in remaining:
         episode_values = _candidate_episode_values(candidate, episode_upper_bound=episode_upper_bound)
         if not episode_values:
             without_episode.append(candidate)
@@ -1084,7 +1094,7 @@ def _prioritize_tv_candidates_by_missing_episodes(
         if prefer_backfill
         else (fresh_candidates + backfill_candidates)
     )
-    return prioritized_with_episode + without_episode + existing_candidates
+    return fixed_candidates + prioritized_with_episode + without_episode + existing_candidates
 
 
 def _prioritize_quark_tv_candidates_for_precise_scan(

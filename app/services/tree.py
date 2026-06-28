@@ -143,7 +143,7 @@ def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
             try:
                 download_urls, download_cookie = _resolve_115_download_payload(cookie, pick_code)
                 raw_bytes = _download_tree_file_bytes(download_urls, cookie, download_cookie)
-                text_content = raw_bytes.decode("utf-8", errors="replace")
+                text_content = _decode_tree_file_text(raw_bytes)
             except Exception as exc:
                 text_content = None
                 download_err = str(exc)

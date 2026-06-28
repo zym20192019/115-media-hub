@@ -165,6 +165,13 @@ def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
                     _save_tree_raw_cache(os.path.join(TREE_DIR, f"raw_{file_name}"), raw_bytes)
                 except Exception:
                     pass
+                # 在 115 网盘上将文件重命名为 目录树.txt
+                if file_name != "目录树.txt" and file_id:
+                    try:
+                        from ..providers.pan115 import rename_115_entry
+                        rename_115_entry(cookie, file_id, "目录树.txt")
+                    except Exception:
+                        pass
             else:
                 result["download_error"] = download_err
             return result

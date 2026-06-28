@@ -3027,12 +3027,19 @@ async def run_subscription_task(
                 deduped_candidates.append(candidate)
             with_episode_candidates = [item for item in deduped_candidates if int(item.get("episode", 0) or 0) > 0]
             without_episode_candidates = [item for item in deduped_candidates if int(item.get("episode", 0) or 0) <= 0]
+            # 固定链接候选（extra.subscription_fixed_link_fallback）保持最前，不受有无集数影响
+            fixed_batch = [
+                item for item in without_episode_candidates
+                if isinstance(item.get("item", {}).get("extra"), dict)
+                and item["item"]["extra"].get("subscription_fixed_link_fallback")
+            ]
+            other_without = [item for item in without_episode_candidates if item not in fixed_batch]
             if with_episode_candidates:
                 # 保留少量无集数候选兜底，避免合集文案无法标准解析时被整体丢弃。
-                fallback_without_episode = without_episode_candidates[: min(3, len(without_episode_candidates))]
-                attempt_candidates = with_episode_candidates + fallback_without_episode
+                fallback_without_episode = other_without[: min(3, len(other_without))]
+                attempt_candidates = fixed_batch + with_episode_candidates + fallback_without_episode
             else:
-                attempt_candidates = without_episode_candidates
+                attempt_candidates = fixed_batch + other_without
             batch_mode_label = "手动追更批量模式" if trigger_is_manual else "自动缺集补齐模式"
             await write_subscription_log(
                 f"{batch_mode_label}：同集/同范围最多保留 {bucket_limit_per_episode} 条，补齐候选 {len(attempt_candidates)} 条，本轮全部纳入尝试队列",

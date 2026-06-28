@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 
 from ..background import submit_background
 from ..core import *  # noqa: F401,F403
-from ..services.tree import run_sync, export_115_tree
+from ..services.tree import run_sync, export_115_tree, query_115_tree_export_status
 
 router = APIRouter()
 
@@ -58,6 +58,38 @@ async def export_tree(request: Request) -> Dict[str, Any]:
         return result
     except Exception as exc:
         return {"ok": False, "msg": str(exc)}
+
+
+@router.get("/export/status")
+async def export_tree_status(request: Request) -> Dict[str, Any]:
+    """
+    查询115目录树导出状态（轮询用）。
+    
+    Query params:
+        export_id: 导出任务ID
+    
+    Returns:
+        status: processing / completed / failed / error
+    """
+    try:
+        export_id = request.query_params.get("export_id")
+        if not export_id:
+            return {"ok": False, "msg": "缺少 export_id", "status": "error"}
+        
+        cfg = get_config()
+        cookie = str(cfg.get("cookie_115", "")).strip()
+        
+        if not cookie:
+            return {"ok": False, "msg": "请先配置 115 Cookie", "status": "error"}
+        
+        result = await asyncio.to_thread(
+            query_115_tree_export_status,
+            cookie,
+            int(export_id),
+        )
+        return result
+    except Exception as exc:
+        return {"ok": False, "msg": str(exc), "status": "error"}
 
 
 @router.get("/logs")

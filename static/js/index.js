@@ -2165,6 +2165,7 @@
             const layerLimit = parseInt(document.getElementById('tree-export-layer-limit')?.value || '25', 10);
             const btn = document.getElementById('tree-export-btn');
             const statusEl = document.getElementById('tree-export-status');
+            const contentEl = document.getElementById('tree-export-content');
 
             if (!folderPath) {
                 if (statusEl) {
@@ -2172,6 +2173,11 @@
                     statusEl.textContent = '请填写 115 文件夹路径';
                 }
                 return;
+            }
+
+            // 隐藏之前的结果内容
+            if (contentEl) {
+                contentEl.classList.add('hidden');
             }
 
             if (btn) {
@@ -2185,24 +2191,31 @@
             }
 
             try {
-                const resp = await fetch('/tree/export', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ folder_path: folderPath, layer_limit: layerLimit }),
+                const result = await window.MediaHubApi.postJson('/tree/export', {
+                    folder_path: folderPath,
+                    layer_limit: layerLimit,
                 });
-                const result = await resp.json();
 
-                if (result.ok) {
-                    if (statusEl) {
-                        statusEl.className = 'text-xs text-emerald-400';
-                        statusEl.textContent = `导出任务已提交 (export_id: ${result.export_id})，请在 115 网盘中查看生成的目录树文件`;
-                    }
-                } else {
+                if (!result.ok) {
                     if (statusEl) {
                         statusEl.className = 'text-xs text-red-400';
                         statusEl.textContent = `失败: ${result.msg || '未知错误'}`;
                     }
+                    return;
                 }
+
+                const exportId = result.export_id;
+                if (!exportId) {
+                    if (statusEl) {
+                        statusEl.className = 'text-xs text-red-400';
+                        statusEl.textContent = '失败: 未返回 export_id';
+                    }
+                    return;
+                }
+
+                // 开始轮询导出状态
+                await _pollTreeExportStatus(exportId, btn, statusEl, contentEl);
+
             } catch (err) {
                 if (statusEl) {
                     statusEl.className = 'text-xs text-red-400';
@@ -2214,6 +2227,73 @@
                     btn.textContent = '生成目录树';
                     btn.classList.remove('opacity-50', 'cursor-not-allowed');
                 }
+            }
+        }
+
+        async function _pollTreeExportStatus(exportId, btn, statusEl, contentEl) {
+            const pollInterval = 2000; // 2 秒
+            let elapsed = 0;
+            const maxWait = 120000; // 最多等 2 分钟
+
+            while (elapsed < maxWait) {
+                await new Promise(r => setTimeout(r, pollInterval));
+                elapsed += pollInterval;
+
+                try {
+                    const state = await window.MediaHubApi.getJson(`/tree/export/status?export_id=${exportId}`);
+
+                    if (!state.ok) {
+                        if (statusEl) {
+                            statusEl.className = 'text-xs text-red-400';
+                            statusEl.textContent = `查询状态失败: ${state.msg || '未知错误'}`;
+                        }
+                        return;
+                    }
+
+                    if (state.status === 'processing') {
+                        if (statusEl) {
+                            statusEl.className = 'text-xs text-sky-400';
+                            statusEl.textContent = `导出中…（已等待 ${Math.round(elapsed / 1000)} 秒）`;
+                        }
+                        continue;
+                    }
+
+                    if (state.status === 'completed') {
+                        if (statusEl) {
+                            statusEl.className = 'text-xs text-emerald-400';
+                            statusEl.textContent = `导出完成: ${state.file_name || ''}`;
+                        }
+                        // 显示内容
+                        if (contentEl && state.content) {
+                            const preview = state.content.length > 500
+                                ? state.content.slice(0, 500) + '\n...（共 ' + state.content.length + ' 字符）'
+                                : state.content;
+                            contentEl.textContent = preview;
+                            contentEl.classList.remove('hidden');
+                        }
+                        return;
+                    }
+
+                    // failed / error
+                    if (statusEl) {
+                        statusEl.className = 'text-xs text-red-400';
+                        statusEl.textContent = `失败: ${state.msg || '导出任务失败'}`;
+                    }
+                    return;
+
+                } catch (err) {
+                    if (statusEl) {
+                        statusEl.className = 'text-xs text-red-400';
+                        statusEl.textContent = `轮询出错: ${err.message}`;
+                    }
+                    return;
+                }
+            }
+
+            // 超时
+            if (statusEl) {
+                statusEl.className = 'text-xs text-yellow-400';
+                statusEl.textContent = `导出任务已提交 (export_id: ${exportId})，但等待超时，请稍后到 115 网盘查看结果`;
             }
         }
 

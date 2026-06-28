@@ -86,13 +86,16 @@ def export_115_tree(cookie: str, folder_path: str, layer_limit: int = 25) -> Dic
 def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
     """
     查询115目录树导出状态。
+    真实 115 API 返回结构：
+      - 处理中：{"state":true, "data":[]}（空数组）
+      - 完成：  {"state":true, "data":{"export_id":"...", "file_id":"...", "file_name":"...", "pick_code":"..."}}
     
     Args:
         cookie: 115 cookie
         export_id: 导出任务ID
     
     Returns:
-        包含导出状态的字典
+        包含导出状态的字典。完成时自动下载 TXT 内容带回。
     """
     cookie = str(cookie or "").strip()
     if not cookie:
@@ -110,7 +113,7 @@ def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
     url = f"https://webapi.115.com/files/export_dir?{urllib.parse.urlencode(params)}"
     
     try:
-        response = http_request_json(url, timeout=45, headers=headers)
+        response = http_request_json(url, timeout=45, extra_headers=headers)
         
         if not response.get("state"):
             error_msg = response.get("error") or response.get("message") or "未知错误"
@@ -120,32 +123,60 @@ def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
                 "status": "error",
             }
         
-        data = response.get("data", {})
-        status = data.get("status", "")
+        raw_data = response.get("data")
         
-        # status: 0=进行中, 1=完成, 2=失败
-        if status == 0:
+        # 实际 API：处理中时 data 是空数组 []
+        if isinstance(raw_data, list):
             return {
                 "ok": True,
                 "status": "processing",
                 "msg": "导出任务进行中",
-                "progress": data.get("progress", 0),
             }
-        elif status == 1:
-            return {
+        
+        # data 是 dict —— 检查是否包含完成信息
+        if isinstance(raw_data, dict) and raw_data.get("pick_code"):
+            pick_code = str(raw_data.get("pick_code", "")).strip()
+            file_name = str(raw_data.get("file_name", "")).strip()
+            file_id = str(raw_data.get("file_id", "")).strip()
+            
+            # 自动下载 TXT 内容
+            try:
+                download_urls, download_cookie = _resolve_115_download_payload(cookie, pick_code)
+                raw_bytes = _download_tree_file_bytes(download_urls, cookie, download_cookie)
+                text_content = raw_bytes.decode("utf-8", errors="replace")
+            except Exception as exc:
+                text_content = None
+                download_err = str(exc)
+            
+            result: Dict[str, Any] = {
                 "ok": True,
                 "status": "completed",
                 "msg": "导出任务已完成",
-                "download_url": data.get("url", ""),
-                "file_size": data.get("file_size", 0),
-                "pick_code": data.get("pick_code", ""),
+                "file_name": file_name,
+                "file_id": file_id,
+                "pick_code": pick_code,
             }
-        else:
+            if text_content is not None:
+                result["content"] = text_content
+                result["content_size"] = len(text_content)
+            else:
+                result["download_error"] = download_err
+            return result
+        
+        # data 是 dict 但没有 pick_code，可能出错
+        if isinstance(raw_data, dict):
             return {
                 "ok": True,
                 "status": "failed",
-                "msg": f"导出任务失败: {data.get('error', '未知错误')}",
+                "msg": f"导出任务失败: {raw_data.get('error', '未知错误')}",
             }
+        
+        # 其他意外情况
+        return {
+            "ok": True,
+            "status": "processing",
+            "msg": "导出任务进行中",
+        }
     except Exception as exc:
         return {
             "ok": False,

@@ -1286,15 +1286,15 @@
             if (minScoreWrapEl) minScoreWrapEl.classList.toggle('hidden', !hasMinScore);
             if (minScoreInputEl) minScoreInputEl.disabled = !hasMinScore;
             if (strategyHintEl) {
-                const baseHint = '匹配策略：默认先执行资源搜索（TG 频道搜索，及启用时的 PanSou 搜索）';
+                const baseHint = '匹配策略：默认优先执行固定分享链接，再执行资源搜索（TG 频道搜索，及启用时的 PanSou 搜索）';
                 if (hasFixedShare) {
-                    strategyHintEl.textContent = baseHint + '；可开启固定分享链接兜底，把固定链接候选排在资源搜索候选之后。';
+                    strategyHintEl.textContent = baseHint + '；可开启固定分享链接兜底，把固定链接候选排在资源搜索候选之前。';
                 } else {
                     strategyHintEl.textContent = baseHint + '，也可手动扫描单个分享链接。';
                 }
             }
             if (fixedLinkTitleEl) fixedLinkTitleEl.textContent = '固定分享链接（可选）';
-            if (fixedLinkHintEl) fixedLinkHintEl.textContent = `资源搜索会优先执行（TG 频道搜索，及启用时的 PanSou 搜索）；下方开关开启后，这个固定 ${providerLabel} 分享链接会作为备选候选排在资源搜索候选之后。`;
+            if (fixedLinkHintEl) fixedLinkHintEl.textContent = `固定分享链接会优先执行；下方开关开启后，后台仍会做资源搜索（TG 频道搜索，及启用时的 PanSou 搜索），匹配不到的场合再从资源搜索候选中补充。`;
             if (shareSubdirLabelEl) shareSubdirLabelEl.textContent = `${providerLabel} 分享子目录（可选）`;
             if (shareLinkInputEl) {
                 const exampleMap = {

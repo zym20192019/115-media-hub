@@ -2419,7 +2419,7 @@ async def run_subscription_task(
             )
         elif fixed_link_fallback_enabled:
             await write_subscription_log(
-                f"固定链接兜底已启用：将先执行资源搜索，再把固定 {provider_label} 分享链接追加为备选候选",
+                f"固定链接兜底已启用：将优先执行固定分享链接，再将资源搜索候选追加到其后",
                 "info",
             )
         elif use_fixed_share_link:
@@ -2472,7 +2472,7 @@ async def run_subscription_task(
                 "正在准备扫描链接候选"
                 if manual_link_enabled
                 else (
-                    "正在执行资源搜索，固定链接将作为备选"
+                    "正在执行固定分享链接，资源搜索将作为备选"
                     if fixed_link_fallback_enabled
                     else "正在主动搜索资源"
                 )
@@ -2502,13 +2502,13 @@ async def run_subscription_task(
                     task_share_link_receive_code,
                 )
                 await write_subscription_log(
-                    "固定链接兜底候选已生成，将排在资源搜索候选之后",
+                    "固定链接兜底候选已生成，将排在资源搜索候选之前",
                     "info",
                 )
                 search_result = merge_subscription_search_results(
                     fixed_search_result,
                     resource_search_result,
-                    fixed_candidates_last=True,
+                    fixed_candidates_last=False,
                 )
         search_duration_seconds = max(0.0, time.perf_counter() - search_started_at)
         search_stats = search_result.get("stats", {}) if isinstance(search_result.get("stats"), dict) else {}

@@ -40,6 +40,19 @@ def export_115_tree(cookie: str, folder_path: str, layer_limit: int = 25) -> Dic
     if not folder_cid:
         raise RuntimeError(f"无法找到文件夹：{folder_path}")
     
+    # 删除已存在的 目录树.txt，避免导出后文件名冲突（115 会自动加(1)后缀）
+    try:
+        entries = list_115_entries(cookie, folder_cid)
+        for entry in entries:
+            if not entry.get("is_dir") and str(entry.get("name", "")).strip() == "目录树.txt":
+                entry_id = str(entry.get("id", "")).strip()
+                if entry_id:
+                    from ..providers.pan115 import delete_115_entries
+                    delete_115_entries(cookie, [entry_id], folder_cid)
+                break
+    except Exception:
+        pass
+    
     # 调用115官方导出API
     headers = {
         "Cookie": cookie,

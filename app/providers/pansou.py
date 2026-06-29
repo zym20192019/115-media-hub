@@ -28,7 +28,7 @@ PANSOU_SEARCH_TOTAL_LIMIT = max(
     min(200, int(os.environ.get("PANSOU_SEARCH_TOTAL_LIMIT", 80) or 80)),
 )
 
-SUPPORTED_PANSOU_CLOUD_TYPES = ("115", "magnet", "quark")
+SUPPORTED_PANSOU_CLOUD_TYPES = ("115", "115share", "magnet", "quark")
 PANSOU_TOKEN_REFRESH_SKEW_SECONDS = 60
 _PANSOU_JWT_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -205,8 +205,8 @@ def pansou_cloud_types_for_provider_filter(
     normalized = str(provider_filter or "all").strip().lower()
     if normalized in ("115", "115share"):
         if not include_magnet_for_115:
-            return ["115"]
-        return ["115", "magnet"]
+            return ["115", "115share"]
+        return ["115", "115share", "magnet"]
     if normalized in ("magnet", "magnet115"):
         return ["magnet"]
     if normalized == "quark":

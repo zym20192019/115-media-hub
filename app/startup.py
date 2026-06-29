@@ -10,7 +10,7 @@ from .services.monitor import queue_monitor_job
 from .services.resource import schedule_resource_job_refresh
 from .services.sign115 import refresh_sign115_status, run_sign115_job
 from .services.subscription import queue_subscription_job
-from .services.tree import run_sync
+from .services.tree import run_sync, run_tree_export_job
 
 
 MEMORY_HOUSEKEEPING_INTERVAL_SECONDS = max(
@@ -216,6 +216,43 @@ async def startup() -> None:
                     submit_background(run_sign115_job, "cron", label="sign115-cron")
             await asyncio.sleep(20)
 
+    async def tree_export_scheduler() -> None:
+        await asyncio.sleep(10)
+        last_run = 0.0
+        while True:
+            cfg = get_config()
+            enabled = bool(cfg.get("tree_export_enabled", False))
+            interval_raw = cfg.get("tree_export_cron_minutes", 0)
+            folder_path = str(cfg.get("tree_export_folder_path", "")).strip()
+            layer_limit = max(1, min(100, int(cfg.get("tree_export_layer_limit", 25) or 25)))
+            try:
+                interval_min = int(str(interval_raw).strip() or 0)
+            except (TypeError, ValueError):
+                interval_min = 0
+
+            running = task_status.get("tree_export_running", False)
+
+            if enabled and interval_min > 0 and folder_path and str(cfg.get("cookie_115", "")).strip():
+                if last_run <= 0:
+                    last_run = time.time()
+                next_ts = last_run + (interval_min * 60)
+                task_status["tree_export_next_run"] = datetime.fromtimestamp(next_ts).strftime("%H:%M:%S")
+                if time.time() >= next_ts and not running:
+                    last_run = time.time()
+                    task_status["tree_export_running"] = True
+                    schedule_ui_state_push(0)
+                    try:
+                        cookie = str(cfg.get("cookie_115", "")).strip()
+                        await asyncio.to_thread(run_tree_export_job, cookie, folder_path, layer_limit)
+                    finally:
+                        task_status["tree_export_running"] = False
+                        schedule_ui_state_push(0)
+            else:
+                task_status.pop("tree_export_next_run", None)
+                if not enabled or interval_min <= 0:
+                    last_run = time.time()
+            await asyncio.sleep(5)
+
     async def memory_housekeeper() -> None:
         await asyncio.sleep(MEMORY_HOUSEKEEPING_INTERVAL_SECONDS)
         while True:
@@ -227,6 +264,7 @@ async def startup() -> None:
     asyncio.create_task(monitor_scheduler())
     asyncio.create_task(subscription_scheduler())
     asyncio.create_task(sign115_scheduler())
+    asyncio.create_task(tree_export_scheduler())
     asyncio.create_task(memory_housekeeper())
 
 

@@ -104,12 +104,12 @@
                                 <input id="subscription_share_receive_code" class="w-full bg-slate-900 border-slate-700 rounded-xl p-3 text-sm font-mono uppercase tracking-[0.08em]" placeholder="可选：提取码（1-16 位字母数字）">
                                 <button type="button" onclick="openSubscriptionShareFolderModal(true)" class="px-4 py-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold whitespace-nowrap">应用并浏览</button>
                             </div>
-                            <div id="subscription-fixed-link-hint" class="text-[11px] text-slate-500 leading-5">资源搜索会优先执行（TG 频道搜索，及启用时的 PanSou 搜索）；下方开关开启后，这个固定分享链接会作为备选候选排在资源搜索候选之后。</div>
+                            <div id="subscription-fixed-link-hint" class="text-[11px] text-slate-500 leading-5">固定分享链接会优先执行；下方开关开启后，后台仍会做资源搜索（TG 频道搜索，及启用时的 PanSou 搜索），匹配不到的场合再从资源搜索候选中补充。</div>
                             <label class="flex items-center gap-3 cursor-pointer text-sm">
                                 <input type="checkbox" id="subscription_fixed_link_channel_search" class="ui-checkbox">
                                 启用固定分享链接兜底
                             </label>
-                            <div class="text-[11px] text-slate-500 leading-5">开启后会先做资源搜索，再把固定链接追加为兜底候选；关闭时即使填写固定链接，也只按资源搜索执行。</div>
+                            <div class="text-[11px] text-slate-500 leading-5">开启后会优先执行固定分享链接，再把资源搜索候选追加到其后；关闭时即使填写固定链接，也只做资源搜索。</div>
                         </div>
                         <label class="block">
                             <span id="subscription-share-subdir-label" class="text-xs text-slate-500">分享子目录（可选）</span>
@@ -219,7 +219,7 @@
                         启用任务（关闭后不参与定时，但仍可手动运行）
                     </label>
                     <div id="subscription-provider-strategy-hint" class="text-xs text-slate-500 leading-6">
-                        匹配策略：默认先执行资源搜索（TG 频道搜索，及启用时的 PanSou 搜索）；可开启固定分享链接兜底，把固定链接候选排在资源搜索候选之后。
+                        匹配策略：默认优先执行固定分享链接，再执行资源搜索（TG 频道搜索，及启用时的 PanSou 搜索）；可关闭固定分享链接兜底，改为仅做资源搜索。
                     </div>
                 </div>
                 <div class="subscription-modal-actions-inline subscription-modal-footer-shell grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">

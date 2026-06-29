@@ -40,6 +40,19 @@ def export_115_tree(cookie: str, folder_path: str, layer_limit: int = 25) -> Dic
     if not folder_cid:
         raise RuntimeError(f"无法找到文件夹：{folder_path}")
     
+    # 删除已存在的 目录树.txt，避免导出后文件名冲突（115 会自动加(1)后缀）
+    try:
+        entries = list_115_entries(cookie, folder_cid)
+        for entry in entries:
+            if not entry.get("is_dir") and str(entry.get("name", "")).strip() == "目录树.txt":
+                entry_id = str(entry.get("id", "")).strip()
+                if entry_id:
+                    from ..providers.pan115 import delete_115_entries
+                    delete_115_entries(cookie, [entry_id], folder_cid)
+                break
+    except Exception:
+        pass
+    
     # 调用115官方导出API
     headers = {
         "Cookie": cookie,
@@ -143,7 +156,7 @@ def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
             try:
                 download_urls, download_cookie = _resolve_115_download_payload(cookie, pick_code)
                 raw_bytes = _download_tree_file_bytes(download_urls, cookie, download_cookie)
-                text_content = raw_bytes.decode("utf-8", errors="replace")
+                text_content = _decode_tree_file_text(raw_bytes)
             except Exception as exc:
                 text_content = None
                 download_err = str(exc)
@@ -159,6 +172,19 @@ def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
             if text_content is not None:
                 result["content"] = text_content
                 result["content_size"] = len(text_content)
+                # 保存为固定名称 目录树.txt，可被目录树源直接引用
+                try:
+                    _save_tree_raw_cache(os.path.join(TREE_DIR, "目录树.txt"), raw_bytes)
+                    _save_tree_raw_cache(os.path.join(TREE_DIR, f"raw_{file_name}"), raw_bytes)
+                except Exception:
+                    pass
+                # 在 115 网盘上将文件重命名为 目录树.txt
+                if file_name != "目录树.txt" and file_id:
+                    try:
+                        from ..providers.pan115 import rename_115_entry
+                        rename_115_entry(cookie, file_id, "目录树.txt")
+                    except Exception:
+                        pass
             else:
                 result["download_error"] = download_err
             return result
@@ -183,6 +209,37 @@ def query_115_tree_export_status(cookie: str, export_id: int) -> Dict[str, Any]:
             "msg": f"查询导出状态失败: {exc}",
             "status": "error",
         }
+
+
+def run_tree_export_job(cookie: str, folder_path: str, layer_limit: int = 25) -> Dict[str, Any]:
+    """
+    完整执行 115 目录树导出流程：提交 -> 轮询等待 -> 下载保存。
+    用于定时任务后台调用。
+    """
+    try:
+        export_result = export_115_tree(cookie, folder_path, layer_limit)
+        if not export_result.get("ok"):
+            return {"ok": False, "msg": export_result.get("msg", "提交导出任务失败")}
+
+        export_id = export_result.get("export_id")
+        if not export_id:
+            return {"ok": False, "msg": "未返回 export_id"}
+
+        # 轮询直到完成（最多等 3 分钟）
+        max_retries = 90
+        for attempt in range(max_retries):
+            time.sleep(2)
+            status_result = query_115_tree_export_status(cookie, export_id)
+            if not status_result.get("ok"):
+                continue
+            if status_result.get("status") == "completed":
+                return status_result
+            if status_result.get("status") in ("failed", "error"):
+                return status_result
+
+        return {"ok": False, "msg": "导出任务等待超时", "status": "timeout"}
+    except Exception as exc:
+        return {"ok": False, "msg": f"导出任务异常: {exc}", "status": "error"}
 
 
 def _format_tree_elapsed_seconds(seconds: float) -> str:

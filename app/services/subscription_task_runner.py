@@ -2419,7 +2419,7 @@ async def run_subscription_task(
             )
         elif fixed_link_fallback_enabled:
             await write_subscription_log(
-                f"固定链接兜底已启用：将先执行资源搜索，再把固定 {provider_label} 分享链接追加为备选候选",
+                f"固定链接兜底已启用：将优先执行固定分享链接，再将资源搜索候选追加到其后",
                 "info",
             )
         elif use_fixed_share_link:
@@ -2472,7 +2472,7 @@ async def run_subscription_task(
                 "正在准备扫描链接候选"
                 if manual_link_enabled
                 else (
-                    "正在执行资源搜索，固定链接将作为备选"
+                    "正在执行固定分享链接，资源搜索将作为备选"
                     if fixed_link_fallback_enabled
                     else "正在主动搜索资源"
                 )
@@ -2502,13 +2502,13 @@ async def run_subscription_task(
                     task_share_link_receive_code,
                 )
                 await write_subscription_log(
-                    "固定链接兜底候选已生成，将排在资源搜索候选之后",
+                    "固定链接兜底候选已生成，将排在资源搜索候选之前",
                     "info",
                 )
                 search_result = merge_subscription_search_results(
                     fixed_search_result,
                     resource_search_result,
-                    fixed_candidates_last=True,
+                    fixed_candidates_last=False,
                 )
         search_duration_seconds = max(0.0, time.perf_counter() - search_started_at)
         search_stats = search_result.get("stats", {}) if isinstance(search_result.get("stats"), dict) else {}
@@ -3027,12 +3027,19 @@ async def run_subscription_task(
                 deduped_candidates.append(candidate)
             with_episode_candidates = [item for item in deduped_candidates if int(item.get("episode", 0) or 0) > 0]
             without_episode_candidates = [item for item in deduped_candidates if int(item.get("episode", 0) or 0) <= 0]
+            # 固定链接候选（extra.subscription_fixed_link_fallback）保持最前，不受有无集数影响
+            fixed_batch = [
+                item for item in without_episode_candidates
+                if isinstance(item.get("item", {}).get("extra"), dict)
+                and item["item"]["extra"].get("subscription_fixed_link_fallback")
+            ]
+            other_without = [item for item in without_episode_candidates if item not in fixed_batch]
             if with_episode_candidates:
                 # 保留少量无集数候选兜底，避免合集文案无法标准解析时被整体丢弃。
-                fallback_without_episode = without_episode_candidates[: min(3, len(without_episode_candidates))]
-                attempt_candidates = with_episode_candidates + fallback_without_episode
+                fallback_without_episode = other_without[: min(3, len(other_without))]
+                attempt_candidates = fixed_batch + with_episode_candidates + fallback_without_episode
             else:
-                attempt_candidates = without_episode_candidates
+                attempt_candidates = fixed_batch + other_without
             batch_mode_label = "手动追更批量模式" if trigger_is_manual else "自动缺集补齐模式"
             await write_subscription_log(
                 f"{batch_mode_label}：同集/同范围最多保留 {bucket_limit_per_episode} 条，补齐候选 {len(attempt_candidates)} 条，本轮全部纳入尝试队列",

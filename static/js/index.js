@@ -2191,7 +2191,7 @@
             }
 
             try {
-                const result = await window.MediaHubApi.postJson('/tree/export', {
+                const result = await window.MediaHubApi.postJson('/export', {
                     folder_path: folderPath,
                     layer_limit: layerLimit,
                 });
@@ -2240,7 +2240,7 @@
                 elapsed += pollInterval;
 
                 try {
-                    const state = await window.MediaHubApi.getJson(`/tree/export/status?export_id=${exportId}`);
+                    const state = await window.MediaHubApi.getJson(`/export/status?export_id=${exportId}`);
 
                     if (!state.ok) {
                         if (statusEl) {
